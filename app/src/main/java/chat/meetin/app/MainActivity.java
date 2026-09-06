@@ -517,10 +517,12 @@ public class MainActivity extends AppCompatActivity {
         final String finalFilename = (filename == null || filename.isEmpty())
                 ? "download_" + System.currentTimeMillis() + ".file"
                 : filename;
+        final String sessionCookies = CookieManager.getInstance().getCookie(fileUrl);
+        final String webViewUserAgent = webView != null ? webView.getSettings().getUserAgentString() : "MeetIn Android";
+        final File downloadDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
 
         new Thread(() -> {
             try {
-                File downloadDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
                 if (downloadDir == null) throw new IllegalStateException("Download storage is unavailable");
                 if (!downloadDir.exists()) downloadDir.mkdirs();
 
@@ -528,9 +530,8 @@ public class MainActivity extends AppCompatActivity {
                 File outputFile = new File(downloadDir, safeFilename);
 
                 HttpURLConnection connection = (HttpURLConnection) new URL(fileUrl).openConnection();
-                String cookies = CookieManager.getInstance().getCookie(fileUrl);
-                if (cookies != null) connection.setRequestProperty("Cookie", cookies);
-                connection.setRequestProperty("User-Agent", webView != null ? webView.getSettings().getUserAgentString() : "MeetIn Android");
+                if (sessionCookies != null) connection.setRequestProperty("Cookie", sessionCookies);
+                connection.setRequestProperty("User-Agent", webViewUserAgent);
                 connection.setConnectTimeout(15000);
                 connection.setReadTimeout(30000);
                 int responseCode = connection.getResponseCode();
