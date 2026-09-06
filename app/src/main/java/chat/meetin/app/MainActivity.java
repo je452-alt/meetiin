@@ -356,6 +356,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public boolean canRecordNative() {
+            return true;
+        }
+
+        @JavascriptInterface
         public void downloadFile(String url, String filename) {
             Log.d(TAG, "Download requested: " + url);
             runOnUiThread(() -> MainActivity.this.downloadFile(url, filename));
@@ -419,12 +424,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                     != PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "Recording permission required", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                Toast.makeText(this, "Voice notes require Android 10 or newer", Toast.LENGTH_SHORT).show();
+                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST_CODE);
+                Toast.makeText(this, "Allow microphone access, then tap record again", Toast.LENGTH_SHORT).show();
                 return;
             }
 
@@ -433,13 +434,20 @@ public class MainActivity extends AppCompatActivity {
             if (!audioDir.exists()) audioDir.mkdirs();
 
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-            audioFilePath = audioDir.getAbsolutePath() + "/voice-note_" + timeStamp + ".ogg";
+            boolean supportsOgg = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
+            audioFilePath = audioDir.getAbsolutePath() + "/voice-note_" + timeStamp + (supportsOgg ? ".ogg" : ".3gp");
 
             mediaRecorder = new MediaRecorder();
             mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.OGG);
-            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.OPUS);
-            mediaRecorder.setAudioSamplingRate(48000);
+            if (supportsOgg) {
+                mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.OGG);
+                mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.OPUS);
+                mediaRecorder.setAudioSamplingRate(48000);
+            } else {
+                mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+                mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+                mediaRecorder.setAudioSamplingRate(16000);
+            }
             mediaRecorder.setOutputFile(audioFilePath);
 
             mediaRecorder.prepare();
@@ -488,9 +496,11 @@ public class MainActivity extends AppCompatActivity {
                 while ((count = audioInput.read(buffer)) != -1) bytesOut.write(buffer, 0, count);
                 audioInput.close();
                 byte[] bytes = bytesOut.toByteArray();
-                String dataUrl = "data:audio/ogg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
-                String js = "javascript:if(typeof onNativeVoiceNote === 'function'){onNativeVoiceNote(" +
-                        JSONObject.quote(dataUrl) + "," + JSONObject.quote(audioFile.getName()) + ",\"audio/ogg\");}";
+                boolean isOgg = audioFile.getName().toLowerCase(Locale.ROOT).endsWith(".ogg");
+                String mimeType = isOgg ? "audio/ogg" : "audio/3gpp";
+                String dataUrl = "data:" + mimeType + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
+                String js = "if(typeof onNativeVoiceNote === 'function'){onNativeVoiceNote(" +
+                        JSONObject.quote(dataUrl) + "," + JSONObject.quote(audioFile.getName()) + "," + JSONObject.quote(mimeType) + ");}";
                 webView.evaluateJavascript(js, null);
                 Log.d(TAG, "Sent OGG voice note to website");
             } catch (Exception e) {
