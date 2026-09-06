@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.MediaRecorder;
@@ -24,17 +25,21 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.PermissionRequest;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
+import android.util.Base64;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.URL;
+import java.net.HttpURLConnection;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -46,7 +51,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int REQUEST_FILE_PICKER = 1001;
-    private static final String URL = "https://meetstandalo-bzld68ny.manus.space";
+    private static final String URL = "https://meetinapp-bj2ib4p7.manus.space";
 
     // File picker callback
     private ValueCallback<Uri[]> fileUploadCallback;
@@ -249,6 +254,17 @@ public class MainActivity extends AppCompatActivity {
             // File chooser support
             webView.setWebChromeClient(new WebChromeClient() {
                 @Override
+                public void onPermissionRequest(final PermissionRequest request) {
+                    runOnUiThread(() -> {
+                        if (request.getOrigin() != null && request.getOrigin().toString().startsWith("https://meetinapp-bj2ib4p7.manus.space")) {
+                            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                        } else {
+                            request.deny();
+                        }
+                    });
+                }
+
+                @Override
                 public boolean onShowFileChooser(WebView webView,
                         ValueCallback<Uri[]> filePathCallback,
                         FileChooserParams fileChooserParams) {
@@ -261,7 +277,8 @@ public class MainActivity extends AppCompatActivity {
                     contentSelectionIntent.addCategory(Intent.CATEGORY_OPENABLE);
                     contentSelectionIntent.setType("*/*");
                     contentSelectionIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                        "image/*", "video/*", "audio/*", "application/*"
+                        "image/*", "video/*", "audio/*", "text/*", "application/pdf", "application/msword",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/*"
                     });
 
                     startActivityForResult(
@@ -270,6 +287,14 @@ public class MainActivity extends AppCompatActivity {
                     );
                     return true;
                 }
+            });
+
+            webView.setDownloadListener((downloadUrl, userAgent, contentDisposition, mimeType, contentLength) -> {
+                String filename = "download_" + System.currentTimeMillis();
+                if (contentDisposition != null && contentDisposition.contains("filename=")) {
+                    filename = contentDisposition.substring(contentDisposition.indexOf("filename=") + 9).replace("\"", "").trim();
+                }
+                downloadFile(downloadUrl, filename);
             });
 
             Log.d(TAG, "WebView setup complete");
@@ -326,6 +351,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public boolean canRecordOgg() {
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
+        }
+
+        @JavascriptInterface
         public void downloadFile(String url, String filename) {
             Log.d(TAG, "Download requested: " + url);
             runOnUiThread(() -> MainActivity.this.downloadFile(url, filename));
@@ -356,12 +386,16 @@ public class MainActivity extends AppCompatActivity {
                 nm.createNotificationChannel(channel);
             }
 
+            Intent launchIntent = new Intent(this, MainActivity.class);
+            PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+
             Notification notification = new NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(title)
                 .setContentText(message)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .build();
 
@@ -389,17 +423,23 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            File audioDir = new File(Environment.getExternalStorageDirectory(), "MeetIn_Audio");
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                Toast.makeText(this, "Voice notes require Android 10 or newer", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            File audioDir = getExternalFilesDir(Environment.DIRECTORY_MUSIC);
+            if (audioDir == null) throw new IllegalStateException("Audio storage is unavailable");
             if (!audioDir.exists()) audioDir.mkdirs();
 
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-            audioFilePath = audioDir.getAbsolutePath() + "/recording_" + timeStamp + ".3gp";
+            audioFilePath = audioDir.getAbsolutePath() + "/voice-note_" + timeStamp + ".ogg";
 
             mediaRecorder = new MediaRecorder();
             mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
-            mediaRecorder.setAudioSamplingRate(16000);
+            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.OGG);
+            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.OPUS);
+            mediaRecorder.setAudioSamplingRate(48000);
             mediaRecorder.setOutputFile(audioFilePath);
 
             mediaRecorder.prepare();
@@ -427,7 +467,7 @@ public class MainActivity extends AppCompatActivity {
             mediaRecorder = null;
             isRecording = false;
 
-            Toast.makeText(this, "✅ Recording saved: " + audioFilePath, Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "✅ Voice note ready", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Recording saved: " + audioFilePath);
             sendFileToWebsite(audioFilePath);
 
@@ -439,11 +479,24 @@ public class MainActivity extends AppCompatActivity {
 
     private void sendFileToWebsite(String filePath) {
         if (webView != null) {
-            String js = "javascript:if(typeof onFileReceived === 'function'){" +
-                "onFileReceived('" + filePath + "', 'audio');" +
-                "}";
-            webView.loadUrl(js);
-            Log.d(TAG, "Sent file path to website: " + filePath);
+            try {
+                File audioFile = new File(filePath);
+                java.io.ByteArrayOutputStream bytesOut = new java.io.ByteArrayOutputStream();
+                InputStream audioInput = new java.io.FileInputStream(audioFile);
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = audioInput.read(buffer)) != -1) bytesOut.write(buffer, 0, count);
+                audioInput.close();
+                byte[] bytes = bytesOut.toByteArray();
+                String dataUrl = "data:audio/ogg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
+                String js = "javascript:if(typeof onNativeVoiceNote === 'function'){onNativeVoiceNote(" +
+                        JSONObject.quote(dataUrl) + "," + JSONObject.quote(audioFile.getName()) + ",\"audio/ogg\");}";
+                webView.evaluateJavascript(js, null);
+                Log.d(TAG, "Sent OGG voice note to website");
+            } catch (Exception e) {
+                Log.e(TAG, "Could not send voice note to website", e);
+                Toast.makeText(this, "Voice note could not be sent", Toast.LENGTH_SHORT).show();
+            }
         }
     }
 
@@ -457,13 +510,22 @@ public class MainActivity extends AppCompatActivity {
 
         new Thread(() -> {
             try {
-                File downloadDir = new File(Environment.getExternalStorageDirectory(), "MeetIn_Downloads");
+                File downloadDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                if (downloadDir == null) throw new IllegalStateException("Download storage is unavailable");
                 if (!downloadDir.exists()) downloadDir.mkdirs();
 
-                File outputFile = new File(downloadDir, finalFilename);
+                String safeFilename = finalFilename.replaceAll("[^a-zA-Z0-9._-]", "_");
+                File outputFile = new File(downloadDir, safeFilename);
 
-                URL url = new URL(fileUrl);
-                InputStream inputStream = url.openStream();
+                HttpURLConnection connection = (HttpURLConnection) new URL(fileUrl).openConnection();
+                String cookies = CookieManager.getInstance().getCookie(fileUrl);
+                if (cookies != null) connection.setRequestProperty("Cookie", cookies);
+                connection.setRequestProperty("User-Agent", webView != null ? webView.getSettings().getUserAgentString() : "MeetIn Android");
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
+                int responseCode = connection.getResponseCode();
+                if (responseCode < 200 || responseCode >= 300) throw new IllegalStateException("Server returned HTTP " + responseCode);
+                InputStream inputStream = connection.getInputStream();
                 FileOutputStream outputStream = new FileOutputStream(outputFile);
 
                 byte[] buffer = new byte[4096];
@@ -474,6 +536,7 @@ public class MainActivity extends AppCompatActivity {
 
                 outputStream.close();
                 inputStream.close();
+                connection.disconnect();
 
                 runOnUiThread(() -> {
                     Toast.makeText(MainActivity.this, "✅ Downloaded: " + outputFile.getAbsolutePath(), Toast.LENGTH_LONG).show();
@@ -538,7 +601,7 @@ public class MainActivity extends AppCompatActivity {
         public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, SslError error) {
             Log.e(TAG, "SSL Error: " + error.getPrimaryError());
             String url = error.getUrl();
-            if (url != null && (url.contains("inbox.dog") || url.contains("manus.space") || url.contains("googleapis.com"))) {
+            if (url != null && (url.contains("inbox.dog") || url.contains("meetinapp-bj2ib4p7.manus.space") || url.contains("manus.space") || url.contains("googleapis.com"))) {
                 Log.d(TAG, "Proceeding with SSL for: " + url);
                 handler.proceed();
             } else {
