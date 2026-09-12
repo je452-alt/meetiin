@@ -2,7 +2,6 @@ import SwiftUI
 import WebKit
 import AVFoundation
 import UserNotifications
-import UniformTypeIdentifiers
 
 private let meetInURL = URL(string: "https://meetinapp-bj2ib4p7.manus.space")!
 
@@ -54,7 +53,7 @@ struct MeetInWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, UIDocumentPickerDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         weak var webView: WKWebView?
         private var recorder: AVAudioRecorder?
         private var recordingURL: URL?
@@ -78,23 +77,6 @@ struct MeetInWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             decisionHandler(.allow)
-        }
-
-        func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
-                     initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
-            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
-            picker.allowsMultipleSelection = parameters.allowsMultipleSelection
-            picker.delegate = self
-            documentPickerCompletion = completionHandler
-            topViewController()?.present(picker, animated: true)
-        }
-
-        private var documentPickerCompletion: (([URL]?) -> Void)?
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            documentPickerCompletion?(urls); documentPickerCompletion = nil
-        }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            documentPickerCompletion?(nil); documentPickerCompletion = nil
         }
 
         private func startRecording() {
