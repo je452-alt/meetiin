@@ -1,4 +1,4 @@
-name: Build APK
+name: Build MeetIn Android and iOS
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,19 +23,13 @@ jobs:
           cmdline-tools-version: 9477386
 
       - name: Accept Android SDK Licenses
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
 
       - name: Install Android build dependencies
-        run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Create local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-      - name: Make gradlew executable
-        run: chmod +x gradlew
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Build APK
         run: ./gradlew --no-daemon --stacktrace assembleDebug
@@ -45,3 +39,27 @@ jobs:
         with:
           name: MeetIn-app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build iOS simulator app
+        run: |
+          xcodebuild \
+            -project ios/MeetIn.xcodeproj \
+            -scheme MeetIn \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Package iOS simulator app
+        run: ditto -c -k --sequesterRsrc --keepParent build/ios/Build/Products/Debug-iphonesimulator/MeetIn.app MeetIn-ios-simulator.zip
+
+      - name: Upload iOS simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeetIn-ios-simulator
+          path: MeetIn-ios-simulator.zip
