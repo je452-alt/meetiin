@@ -54,6 +54,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int REQUEST_FILE_PICKER = 1001;
+    private static final int REQUEST_CREATE_DOWNLOAD = 1002;
     private static final String URL = "https://meetinapp-bj2ib4p7.manus.space";
 
     // File picker callback
@@ -63,6 +64,9 @@ public class MainActivity extends AppCompatActivity {
     private MediaRecorder mediaRecorder;
     private String audioFilePath;
     private boolean isRecording = false;
+    private byte[] pendingDownloadBytes;
+    private String pendingDownloadFilename;
+    private String pendingDownloadMimeType;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -379,6 +383,10 @@ public class MainActivity extends AppCompatActivity {
     // FEATURE 1: POPUP NOTIFICATION
     // ============================================================
     private void createNotification(String title, String message) {
+        createNotification(title, message, null);
+    }
+
+    private void createNotification(String title, String message, Uri contentUri) {
         try {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             String channelId = "meetin_channel";
@@ -395,6 +403,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             Intent launchIntent = new Intent(this, MainActivity.class);
+            if (contentUri != null) {
+                launchIntent = new Intent(Intent.ACTION_VIEW, contentUri);
+                launchIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                launchIntent.setDataAndType(contentUri, getContentResolver().getType(contentUri));
+            }
             PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
             Notification notification = new NotificationCompat.Builder(this, channelId)
@@ -506,11 +519,21 @@ public class MainActivity extends AppCompatActivity {
                 byte[] bytes = bytesOut.toByteArray();
                 boolean isOgg = audioFile.getName().toLowerCase(Locale.ROOT).endsWith(".ogg");
                 String mimeType = isOgg ? "audio/ogg" : "audio/mp4";
-                String dataUrl = "data:" + mimeType + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
-                String js = "if(typeof onNativeVoiceNote === 'function'){onNativeVoiceNote(" +
-                        JSONObject.quote(dataUrl) + "," + JSONObject.quote(audioFile.getName()) + "," + JSONObject.quote(mimeType) + ");}";
-                webView.post(() -> webView.evaluateJavascript(js, null));
-                Log.d(TAG, "Sent voice note to website: " + audioFile.length() + " bytes");
+                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                int chunkSize = 12000;
+                int totalChunks = (base64.length() + chunkSize - 1) / chunkSize;
+                String fileName = audioFile.getName();
+                webView.post(() -> {
+                    webView.evaluateJavascript("if(typeof onNativeVoiceNoteStart==='function'){onNativeVoiceNoteStart(" + JSONObject.quote(fileName) + "," + JSONObject.quote(mimeType) + "," + totalChunks + ");}", null);
+                    for (int index = 0; index < totalChunks; index++) {
+                        int start = index * chunkSize;
+                        int end = Math.min(start + chunkSize, base64.length());
+                        String chunk = base64.substring(start, end);
+                        webView.evaluateJavascript("if(typeof onNativeVoiceNoteChunk==='function'){onNativeVoiceNoteChunk(" + index + "," + JSONObject.quote(chunk) + ");}", null);
+                    }
+                    webView.evaluateJavascript("if(typeof onNativeVoiceNoteComplete==='function'){onNativeVoiceNoteComplete();}", null);
+                });
+                Log.d(TAG, "Sent voice note in " + totalChunks + " chunks: " + audioFile.length() + " bytes");
             } catch (Exception e) {
                 Log.e(TAG, "Could not send voice note to website", e);
                 Toast.makeText(this, "Voice note could not be sent", Toast.LENGTH_SHORT).show();
@@ -530,11 +553,7 @@ public class MainActivity extends AppCompatActivity {
 
         new Thread(() -> {
             HttpURLConnection connection = null;
-            Uri publicUri = null;
-            File legacyOutputFile = null;
             try {
-                String safeFilename = finalFilename.replaceAll("[^a-zA-Z0-9._-]", "_");
-
                 connection = (HttpURLConnection) new URL(fileUrl).openConnection();
                 if (sessionCookies != null) connection.setRequestProperty("Cookie", sessionCookies);
                 connection.setRequestProperty("User-Agent", webViewUserAgent);
@@ -543,53 +562,26 @@ public class MainActivity extends AppCompatActivity {
                 int responseCode = connection.getResponseCode();
                 if (responseCode < 200 || responseCode >= 300) throw new IllegalStateException("Server returned HTTP " + responseCode);
                 InputStream inputStream = connection.getInputStream();
-                OutputStream outputStream;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ContentValues values = new ContentValues();
-                    values.put(MediaStore.Downloads.DISPLAY_NAME, safeFilename);
-                    values.put(MediaStore.Downloads.MIME_TYPE, connection.getContentType() != null ? connection.getContentType() : "application/octet-stream");
-                    values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/MeetIn");
-                    values.put(MediaStore.Downloads.IS_PENDING, 1);
-                    publicUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                    if (publicUri == null) throw new IllegalStateException("Could not create a public download");
-                    outputStream = getContentResolver().openOutputStream(publicUri);
-                    if (outputStream == null) throw new IllegalStateException("Could not open the public download");
-                } else {
-                    File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (!downloadDir.exists()) downloadDir.mkdirs();
-                    legacyOutputFile = new File(downloadDir, safeFilename);
-                    outputStream = new FileOutputStream(legacyOutputFile);
-                }
-
+                java.io.ByteArrayOutputStream bytesOut = new java.io.ByteArrayOutputStream();
                 byte[] buffer = new byte[4096];
                 int bytesRead;
-                while ((bytesRead = inputStream.read(buffer)) != -1) {
-                    outputStream.write(buffer, 0, bytesRead);
-                }
-
-                outputStream.close();
+                while ((bytesRead = inputStream.read(buffer)) != -1) bytesOut.write(buffer, 0, bytesRead);
                 inputStream.close();
-                if (publicUri != null) {
-                    ContentValues complete = new ContentValues();
-                    complete.put(MediaStore.Downloads.IS_PENDING, 0);
-                    getContentResolver().update(publicUri, complete, null, null);
-                }
+                String responseMimeType = connection.getContentType();
                 connection.disconnect();
-
-                final Uri completedUri = publicUri;
-                final File completedLegacyFile = legacyOutputFile;
+                pendingDownloadBytes = bytesOut.toByteArray();
+                pendingDownloadFilename = finalFilename.replaceAll("[^a-zA-Z0-9._-]", "_");
+                pendingDownloadMimeType = responseMimeType != null ? responseMimeType : "application/octet-stream";
                 runOnUiThread(() -> {
-                    String location = completedUri != null ? "Downloads/MeetIn/" + safeFilename : completedLegacyFile.getAbsolutePath();
-                    Toast.makeText(MainActivity.this, "✅ Saved to " + location, Toast.LENGTH_LONG).show();
-                    MainActivity.this.createNotification("Download Complete", finalFilename);
+                    Intent saveIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    saveIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                    saveIntent.setType(pendingDownloadMimeType);
+                    saveIntent.putExtra(Intent.EXTRA_TITLE, pendingDownloadFilename);
+                    startActivityForResult(saveIntent, REQUEST_CREATE_DOWNLOAD);
                 });
-
-                Log.d(TAG, "Downloaded: " + (completedUri != null ? completedUri : completedLegacyFile));
+                Log.d(TAG, "Downloaded bytes ready for user-selected destination: " + pendingDownloadBytes.length);
 
             } catch (Exception e) {
-                if (publicUri != null) {
-                    try { getContentResolver().delete(publicUri, null, null); } catch (Exception ignored) {}
-                }
                 if (connection != null) connection.disconnect();
                 Log.e(TAG, "Download failed", e);
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
@@ -614,6 +606,25 @@ public class MainActivity extends AppCompatActivity {
                 }
                 fileUploadCallback = null;
             }
+        } else if (requestCode == REQUEST_CREATE_DOWNLOAD) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingDownloadBytes != null) {
+                Uri destination = data.getData();
+                try (OutputStream output = getContentResolver().openOutputStream(destination)) {
+                    if (output == null) throw new IllegalStateException("Could not open the selected location");
+                    output.write(pendingDownloadBytes);
+                    output.flush();
+                    Toast.makeText(this, "✅ File saved to the location you selected", Toast.LENGTH_LONG).show();
+                    createNotification("Download Complete", "Tap to open " + pendingDownloadFilename, destination);
+                } catch (Exception error) {
+                    Log.e(TAG, "Could not save selected download location", error);
+                    Toast.makeText(this, "Could not save the file: " + error.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            } else {
+                Toast.makeText(this, "Download cancelled", Toast.LENGTH_SHORT).show();
+            }
+            pendingDownloadBytes = null;
+            pendingDownloadFilename = null;
+            pendingDownloadMimeType = null;
         }
     }
 
