@@ -179,7 +179,7 @@ public class DataSyncService extends Service {
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "MeetIn", NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Chat your perfect match.");
+            channel.setDescription("Private Messaging app for individuals and businesses");
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.createNotificationChannel(channel);
         }
@@ -188,7 +188,7 @@ public class DataSyncService extends Service {
     private Notification createNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("MeetIn")
-                .setContentText("Chat your perfect match.")
+                .setContentText("Private Messaging app for individuals and businesses")
                 .setSmallIcon(R.drawable.ic_stat_meetin)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
