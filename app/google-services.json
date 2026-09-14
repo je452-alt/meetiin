@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "90910245899",
+    "project_id": "meetin-3e70e",
+    "storage_bucket": "meetin-3e70e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:90910245899:android:42138a933417ccb2a5b30e",
+        "android_client_info": {
+          "package_name": "chat.meetin.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBp8r9M6iFGDznAvDxDKodDdfkP65c1T7U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

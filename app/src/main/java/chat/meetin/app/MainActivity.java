@@ -38,6 +38,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import android.util.Base64;
 import org.json.JSONObject;
+import com.google.firebase.messaging.FirebaseMessaging;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -53,11 +54,13 @@ import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
+    private static volatile boolean appVisible = false;
     private WebView webView;
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int REQUEST_FILE_PICKER = 1001;
     private static final int REQUEST_CREATE_DOWNLOAD = 1002;
     private static final String URL = "https://meetinapp-bj2ib4p7.manus.space";
+    private String pendingChatUrl;
 
     // File picker callback
     private ValueCallback<Uri[]> fileUploadCallback;
@@ -74,6 +77,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.d(TAG, "=== onCreate started ===");
+        captureNotificationIntent(getIntent());
 
         // --- STEP 1: Set layout with fallback ---
         try {
@@ -94,11 +98,58 @@ public class MainActivity extends AppCompatActivity {
         new Handler(Looper.getMainLooper()).postDelayed(this::startApp, 10_000L);
     }
 
+    @Override
+    protected void onStart() {
+        super.onStart();
+        appVisible = true;
+    }
+
+    @Override
+    protected void onStop() {
+        appVisible = false;
+        super.onStop();
+    }
+
+    public static boolean isAppVisible() {
+        return appVisible;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        captureNotificationIntent(intent);
+        if (webView != null && pendingChatUrl != null) {
+            webView.loadUrl(pendingChatUrl);
+        }
+    }
+
+    private void captureNotificationIntent(Intent intent) {
+        if (intent == null) return;
+        String chatUrl = intent.getStringExtra("chatUrl");
+        if (chatUrl == null || chatUrl.isEmpty()) return;
+        if (chatUrl.startsWith("/")) {
+            chatUrl = URL + chatUrl;
+        }
+        if (chatUrl.startsWith(URL)) {
+            pendingChatUrl = chatUrl;
+        } else {
+            Log.w(TAG, "Ignoring notification URL outside MeetIn host");
+        }
+    }
+
     private void startApp() {
         View splashScreen = findViewById(R.id.splashScreen);
         if (splashScreen != null) {
             splashScreen.setVisibility(View.GONE);
         }
+
+        FirebaseMessaging.getInstance().getToken()
+                .addOnSuccessListener(token -> getSharedPreferences("meetin_push", MODE_PRIVATE)
+                        .edit()
+                        .putString("fcm_token", token)
+                        .apply())
+                .addOnFailureListener(error -> Log.w(TAG, "Unable to get Firebase token", error));
 
         // --- STEP 2: Request permissions ---
         try {
@@ -326,8 +377,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadUrl() {
         try {
-            webView.loadUrl(URL);
-            Log.d(TAG, "WebView loading URL: " + URL);
+            String initialUrl = pendingChatUrl != null ? pendingChatUrl : URL;
+            webView.loadUrl(initialUrl);
+            Log.d(TAG, "WebView loading URL: " + initialUrl);
         } catch (Exception e) {
             Log.e(TAG, "Failed to load URL", e);
             showFallbackMessage("Failed to load URL");
@@ -355,6 +407,12 @@ public class MainActivity extends AppCompatActivity {
         public void showNotification(String title, String message) {
             Log.d(TAG, "Notification requested: " + title + " - " + message);
             runOnUiThread(() -> MainActivity.this.createNotification(title, message));
+        }
+
+        @JavascriptInterface
+        public String getFcmToken() {
+            return getSharedPreferences("meetin_push", MODE_PRIVATE)
+                    .getString("fcm_token", "");
         }
 
         @JavascriptInterface
