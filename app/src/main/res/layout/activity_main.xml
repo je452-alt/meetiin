@@ -2,12 +2,58 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black">
+    android:background="#020812">
 
     <WebView
         android:id="@+id/webView"
         android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/splashScreen"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
-        />
+        android:orientation="vertical"
+        android:gravity="center"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:background="@drawable/splash_background">
+
+        <ImageView
+            android:id="@+id/splashLogo"
+            android:layout_width="168dp"
+            android:layout_height="168dp"
+            android:contentDescription="MeetIn logo"
+            android:src="@drawable/app_icon"
+            android:scaleType="centerCrop" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="MeetIn"
+            android:textColor="#FFFFFF"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:maxWidth="320dp"
+            android:text="Private Messaging app for individuals and businesses"
+            android:textColor="#D6E7F4"
+            android:textSize="16sp" />
+
+        <ProgressBar
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginTop="36dp"
+            android:indeterminate="true"
+            android:indeterminateTint="#27D7D1"
+            android:contentDescription="Loading" />
+    </LinearLayout>
 
 </FrameLayout>

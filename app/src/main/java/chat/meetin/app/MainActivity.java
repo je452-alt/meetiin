@@ -17,6 +17,8 @@ import android.provider.MediaStore;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
@@ -86,6 +88,16 @@ public class MainActivity extends AppCompatActivity {
             tv.setTextColor(0xFFFFFFFF);
             setContentView(tv);
             return;
+        }
+
+        // Keep the branded splash visible while the app prepares its services and WebView.
+        new Handler(Looper.getMainLooper()).postDelayed(this::startApp, 10_000L);
+    }
+
+    private void startApp() {
+        View splashScreen = findViewById(R.id.splashScreen);
+        if (splashScreen != null) {
+            splashScreen.setVisibility(View.GONE);
         }
 
         // --- STEP 2: Request permissions ---
