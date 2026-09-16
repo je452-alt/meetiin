@@ -26,6 +26,7 @@ public class MeetInFirebaseMessagingService extends FirebaseMessagingService {
                 .edit()
                 .putString("fcm_token", token)
                 .apply();
+        MainActivity.dispatchFcmToken(token);
     }
 
     @Override
@@ -40,8 +41,7 @@ public class MeetInFirebaseMessagingService extends FirebaseMessagingService {
                 remoteMessage.getNotification() != null ? remoteMessage.getNotification().getBody() : null,
                 "You have a new message");
 
-        // The WebView already displays its own popup while the app is visible.
-        if (MainActivity.isAppVisible()) {
+        if (MainActivity.dispatchFcmMessage(title, body, data.get("messageId"))) {
             return;
         }
 

@@ -72,6 +72,8 @@ public class MainActivity extends AppCompatActivity {
     private byte[] pendingDownloadBytes;
     private String pendingDownloadFilename;
     private String pendingDownloadMimeType;
+    private static volatile boolean fcmForegroundHandlingEnabled = false;
+    private static volatile MainActivity activeActivity;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -102,11 +104,13 @@ public class MainActivity extends AppCompatActivity {
     protected void onStart() {
         super.onStart();
         appVisible = true;
+        activeActivity = this;
     }
 
     @Override
     protected void onStop() {
         appVisible = false;
+        if (activeActivity == this) activeActivity = null;
         super.onStop();
     }
 
@@ -416,6 +420,22 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public void enableFcmForegroundHandling() {
+            fcmForegroundHandlingEnabled = true;
+        }
+
+        @JavascriptInterface
+        public void requestFcmToken() {
+            FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
+                if (!task.isSuccessful()) {
+                    Log.w(TAG, "FCM token request failed", task.getException());
+                    return;
+                }
+                dispatchFcmToken(task.getResult());
+            });
+        }
+
+        @JavascriptInterface
         public void startRecording() {
             Log.d(TAG, "Recording requested from website");
             runOnUiThread(() -> MainActivity.this.startVoiceRecording());
@@ -447,6 +467,21 @@ public class MainActivity extends AppCompatActivity {
         public void toast(String message) {
             runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
         }
+    }
+
+    static void dispatchFcmToken(String token) {
+        MainActivity activity = activeActivity;
+        if (activity == null || activity.webView == null || token == null || token.isEmpty()) return;
+        activity.webView.post(() -> activity.webView.evaluateJavascript(
+                "if(typeof onNativeFcmToken==='function'){onNativeFcmToken(" + JSONObject.quote(token) + ");}", null));
+    }
+
+    static boolean dispatchFcmMessage(String title, String body, String messageId) {
+        MainActivity activity = activeActivity;
+        if (!fcmForegroundHandlingEnabled || activity == null || activity.webView == null) return false;
+        activity.webView.post(() -> activity.webView.evaluateJavascript(
+                "if(typeof onNativeFcmMessage==='function'){onNativeFcmMessage(" + JSONObject.quote(title) + "," + JSONObject.quote(body) + "," + JSONObject.quote(messageId == null ? "" : messageId) + ");}", null));
+        return true;
     }
 
     // ============================================================
@@ -747,6 +782,8 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================
     @Override
     protected void onDestroy() {
+        if (activeActivity == this) activeActivity = null;
+        fcmForegroundHandlingEnabled = false;
         if (webView != null) {
             try { webView.destroy(); } catch (Exception e) { Log.w(TAG, "WebView destroy error", e); }
             webView = null;
