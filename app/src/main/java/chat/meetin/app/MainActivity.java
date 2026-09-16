@@ -61,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CREATE_DOWNLOAD = 1002;
     private static final String URL = "https://meetinapp-bj2ib4p7.manus.space";
     private String pendingChatUrl;
+    private boolean oauthRecoveryAttempted = false;
 
     // File picker callback
     private ValueCallback<Uri[]> fileUploadCallback;
@@ -756,6 +757,18 @@ public class MainActivity extends AppCompatActivity {
         public void onPageFinished(WebView view, String url) {
             Log.d(TAG, "Page loaded: " + url);
             try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
+            if (!oauthRecoveryAttempted && url != null && url.startsWith("https://inbox.dog/oauth/callback")) {
+                view.evaluateJavascript("document.body ? document.body.innerText : ''", body -> {
+                    if (body != null && (body.contains("OAuthState not found") || body.contains("STATE_NOT_FOUND") || body.contains("OAuth state expired"))) {
+                        oauthRecoveryAttempted = true;
+                        Toast.makeText(MainActivity.this, "Google sign-in expired. Restarting…", Toast.LENGTH_SHORT).show();
+                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                            oauthRecoveryAttempted = false;
+                            webView.loadUrl(URL + "/api/auth/google/start?origin=" + Uri.encode(URL));
+                        }, 350);
+                    }
+                });
+            }
         }
 
         @Override
