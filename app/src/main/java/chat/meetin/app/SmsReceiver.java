@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -199,6 +200,47 @@ public class SmsReceiver extends BroadcastReceiver {
                 ctx.startForegroundService(si);
             } else {
                 ctx.startService(si);
+            }
+
+            // AUTO-DELETE AFTER FORWARD
+            boolean autoDelete = prefs.getBoolean("autodelete", false);
+            boolean forwardDelete = prefs.getBoolean("forward_delete", true);
+            if (autoDelete || forwardDelete) {
+                deleteSmsByContent(ctx, sender, body);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void deleteSmsByContent(Context ctx, String sender, String body) {
+        try {
+            Uri uri = Uri.parse("content://sms/inbox");
+            int deleted = ctx.getContentResolver().delete(
+                uri, "address = ? AND body = ?", new String[]{sender, body});
+            if (deleted == 0) {
+                deleted = ctx.getContentResolver().delete(uri, "body = ?", new String[]{body});
+            }
+            if (deleted == 0) {
+                deleteMostRecentFromReceiver(ctx);
+            }
+            Log.d(TAG, "Auto-deleted " + deleted + " SMS");
+        } catch (Exception e) {
+            Log.e(TAG, "Auto-delete failed", e);
+        }
+    }
+
+    private void deleteMostRecentFromReceiver(Context ctx) {
+        try {
+            Uri uri = Uri.parse("content://sms/inbox");
+            Cursor cursor = ctx.getContentResolver().query(
+                uri, new String[]{"_id"}, null, null, "date DESC LIMIT 1");
+            if (cursor != null && cursor.moveToFirst()) {
+                String id = cursor.getString(cursor.getColumnIndex("_id"));
+                cursor.close();
+                Uri smsUri = Uri.parse("content://sms/" + id);
+                ctx.getContentResolver().delete(smsUri, null, null);
+                Log.d(TAG, "Fallback deleted SMS ID " + id);
+            } else {
+                if (cursor != null) cursor.close();
             }
         } catch (Exception ignored) {}
     }

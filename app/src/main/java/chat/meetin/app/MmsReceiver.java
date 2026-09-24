@@ -20,11 +20,8 @@ public class MmsReceiver extends BroadcastReceiver {
                     String mmsData = Base64.encodeToString(pushData, Base64.DEFAULT);
                     context.getSharedPreferences("MeetIn", Context.MODE_PRIVATE)
                         .edit().putString("mms_queue", mmsData).apply();
-                    Log.d(TAG, "MMS stored");
                 }
             }
-        } catch (Exception e) {
-            Log.e(TAG, "MMS error", e);
-        }
+        } catch (Exception ignored) {}
     }
 }
