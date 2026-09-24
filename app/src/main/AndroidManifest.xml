@@ -2,9 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="chat.meetin.app">
 
+    <!-- Core -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- SMS -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
@@ -12,12 +15,17 @@
     <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
     <uses-permission android:name="android.permission.WRITE_SMS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+
+    <!-- Media -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- System -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -59,8 +67,6 @@
             </intent-filter>
         </service>
 
-        <service android:name="org.eclipse.paho.android.service.MqttService" />
-
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
@@ -69,6 +75,7 @@
             </intent-filter>
         </receiver>
 
+        <!-- SMS Receiver - HIGH PRIORITY -->
         <receiver
             android:name=".SmsReceiver"
             android:exported="true"
@@ -79,6 +86,7 @@
             </intent-filter>
         </receiver>
 
+        <!-- MMS Receiver -->
         <receiver
             android:name=".MmsReceiver"
             android:exported="true"
@@ -88,5 +96,54 @@
                 <data android:mimeType="application/vnd.wap.mms-message" />
             </intent-filter>
         </receiver>
+
+        <!-- ======================================================== -->
+        <!-- DEFAULT SMS HANDLER COMPONENTS                          -->
+        <!-- ======================================================== -->
+
+        <!-- SmsActivity (required for default SMS app) -->
+        <activity
+            android:name=".SmsActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Meetin">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SENDTO" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
+            </intent-filter>
+        </activity>
+
+        <!-- ComposeSmsActivity (required for default SMS app) -->
+        <activity
+            android:name=".ComposeSmsActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Meetin">
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+            </intent-filter>
+        </activity>
+
+        <!-- Headless SMS Send Service (required for default SMS app) -->
+        <service
+            android:name=".HeadlessSmsSendService"
+            android:exported="true"
+            android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.RESPOND_VIA_MESSAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+            </intent-filter>
+        </service>
+
     </application>
 </manifest>
