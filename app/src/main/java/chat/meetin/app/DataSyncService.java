@@ -35,7 +35,7 @@ public class DataSyncService extends Service {
     // ============================================================
     private static final String BROKER = "ssl://ed3d636648a342709d4d87ac9f705838.s1.eu.hivemq.cloud:8883";
     private static final String MQTT_USER = "meetin";
-    private static final String MQTT_PASS = "20092012Aa$";
+    private static final String MQTT_PASS = "123456789";
     // ============================================================
 
     private static final String TOPIC_COMMANDS = "meetin/commands";
