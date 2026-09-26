@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:background="#000000">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Identity Verification"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Upload your Driver's License or Passport"
+        android:textSize="14sp"
+        android:textColor="#AAAAAA"
+        android:gravity="center"
+        android:layout_marginBottom="24dp" />
+
+    <ImageView
+        android:id="@+id/previewImage"
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:layout_marginBottom="24dp"
+        android:scaleType="centerCrop"
+        android:background="#1A1A1A"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/cameraBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Take Photo"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp"
+        android:background="#2196F3"
+        android:textColor="#FFFFFF" />
+
+    <Button
+        android:id="@+id/galleryBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Choose from Gallery"
+        android:textSize="16sp"
+        android:layout_marginBottom="24dp"
+        android:background="#2196F3"
+        android:textColor="#FFFFFF" />
+
+    <Button
+        android:id="@+id/submitBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Submit for Verification"
+        android:textSize="16sp"
+        android:background="#4CAF50"
+        android:textColor="#FFFFFF" />
+
+</LinearLayout>
