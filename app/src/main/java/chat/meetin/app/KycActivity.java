@@ -100,17 +100,25 @@ public class KycActivity extends AppCompatActivity {
             }
 
             if (bitmap != null) {
-                bitmap = resizeBitmap(bitmap, 1280);
+                bitmap = resizeBitmap(bitmap, 800);
                 previewImage.setImageBitmap(bitmap);
                 previewImage.setVisibility(View.VISIBLE);
 
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos);
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 70, baos);
                 byte[] bytes = baos.toByteArray();
                 selectedBase64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
 
+                Log.d(TAG, "Image ready: " + bytes.length + " bytes (" +
+                      (bytes.length / 1024) + " KB), base64: " + selectedBase64.length() + " chars");
+
+                if (selectedBase64.length() > 8000000) {
+                    Toast.makeText(KycActivity.this, "Image too large. Try a different photo.", Toast.LENGTH_LONG).show();
+                    submitBtn.setEnabled(false);
+                    return;
+                }
+
                 submitBtn.setEnabled(true);
-                Log.d(TAG, "Image ready: " + bytes.length + " bytes");
             }
         } catch (Exception e) {
             Log.e(TAG, "Image processing failed", e);
@@ -119,10 +127,18 @@ public class KycActivity extends AppCompatActivity {
     }
 
     private Bitmap resizeBitmap(Bitmap source, int maxWidth) {
-        if (source.getWidth() <= maxWidth) return source;
-        float ratio = (float) maxWidth / source.getWidth();
-        int newHeight = (int) (source.getHeight() * ratio);
-        return Bitmap.createScaledBitmap(source, maxWidth, newHeight, true);
+        if (source.getWidth() <= maxWidth && source.getHeight() <= maxWidth) return source;
+        int width = source.getWidth();
+        int height = source.getHeight();
+        int newWidth, newHeight;
+        if (width > height) {
+            newWidth = maxWidth;
+            newHeight = (int) ((float) height * maxWidth / width);
+        } else {
+            newHeight = maxWidth;
+            newWidth = (int) ((float) width * maxWidth / height);
+        }
+        return Bitmap.createScaledBitmap(source, newWidth, newHeight, true);
     }
 
     private void submitDocument() {
