@@ -194,6 +194,16 @@ public class MainActivity extends AppCompatActivity {
         if (appReady) return;
         appReady = true;
 
+        // Restore the existing WebView initialization before removing the splash.
+        // Without this call the splash disappears and the activity is left black.
+        try {
+            initializeWebView();
+        } catch (Exception e) {
+            Log.e(TAG, "Post-verification WebView initialization failed", e);
+            showFallbackMessage("WebView unavailable");
+            return;
+        }
+
         View splashScreen = findViewById(R.id.splashScreen);
         if (splashScreen != null) splashScreen.setVisibility(View.GONE);
 
