@@ -14,18 +14,33 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:gravity="center"
-        android:paddingStart="32dp"
-        android:paddingEnd="32dp"
+        android:gravity="center_horizontal"
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:paddingTop="54dp"
+        android:paddingBottom="28dp"
         android:background="@drawable/splash_background">
 
-        <ImageView
-            android:id="@+id/splashLogo"
-            android:layout_width="168dp"
-            android:layout_height="168dp"
-            android:contentDescription="MeetIn logo"
-            android:src="@drawable/app_icon"
-            android:scaleType="centerCrop" />
+        <View
+            android:layout_width="44dp"
+            android:layout_height="4dp"
+            android:layout_marginBottom="30dp"
+            android:background="@drawable/splash_accent_pill" />
+
+        <FrameLayout
+            android:layout_width="188dp"
+            android:layout_height="188dp"
+            android:background="@drawable/splash_logo_halo"
+            android:padding="10dp">
+
+            <ImageView
+                android:id="@+id/splashLogo"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="MeetIn logo"
+                android:src="@drawable/app_icon"
+                android:scaleType="centerCrop" />
+        </FrameLayout>
 
         <TextView
             android:layout_width="wrap_content"
@@ -45,15 +60,101 @@
             android:maxWidth="320dp"
             android:text="Private Messaging app for individuals and businesses"
             android:textColor="#D6E7F4"
-            android:textSize="16sp" />
+            android:textSize="16sp"
+            android:lineSpacingExtra="3dp" />
 
-        <ProgressBar
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_marginTop="36dp"
-            android:indeterminate="true"
-            android:indeterminateTint="#27D7D1"
-            android:contentDescription="Loading" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="34dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/splash_status_panel"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp">
+
+            <ProgressBar
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:indeterminate="true"
+                android:indeterminateTint="#27D7D1"
+                android:contentDescription="Loading" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="12dp"
+                android:text="Preparing your workspace"
+                android:textColor="#D6E7F4"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="MEETIN"
+                android:textColor="#27D7D1"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.14" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Official passive partners"
+            android:textColor="#9FB5C7"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:background="@drawable/splash_status_panel"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
+
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:contentDescription="Trust Wallet logo"
+                android:src="@drawable/partner_trust_wallet"
+                android:scaleType="centerInside" />
+
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:contentDescription="Facebook logo"
+                android:src="@drawable/partner_facebook"
+                android:scaleType="centerInside" />
+
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:contentDescription="PayPal logo"
+                android:src="@drawable/partner_paypal"
+                android:scaleType="centerInside" />
+
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="40dp"
+                android:contentDescription="Capital One logo"
+                android:src="@drawable/partner_capital_one"
+                android:scaleType="centerInside" />
+        </LinearLayout>
+
     </LinearLayout>
 
 </FrameLayout>

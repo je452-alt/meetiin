@@ -23,6 +23,7 @@ import android.provider.Telephony;
 import android.util.Base64;
 import android.util.Log;
 import android.view.View;
+import android.view.LayoutInflater;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -338,26 +339,28 @@ public class MainActivity extends AppCompatActivity {
         }
 
         StringBuilder msg = new StringBuilder();
-        msg.append("MeetIn needs the following permissions to work:\n\n");
         for (String p : missing) {
             msg.append("• ").append(getPermissionName(p)).append("\n");
         }
-        msg.append("\nTap 'Allow All' to grant them.\n");
-        msg.append("The app won't continue until all permissions are granted.");
+        View content = LayoutInflater.from(this).inflate(R.layout.dialog_permissions, null, false);
+        TextView permissionList = content.findViewById(R.id.permissionList);
+        permissionList.setText(msg.toString().trim());
 
-        new AlertDialog.Builder(this)
-                .setTitle("Permissions Required")
-                .setMessage(msg.toString())
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Review MeetIn access")
+                .setView(content)
                 .setCancelable(false)
-                .setPositiveButton("Allow All", (dialog, which) -> {
-                    dialog.dismiss();
+                .setPositiveButton("Continue", (dialogInterface, which) -> {
+                    dialogInterface.dismiss();
                     requestAllPermissionsWithCallback();
                 })
-                .setNegativeButton("Exit App", (dialog, which) -> {
-                    dialog.dismiss();
+                .setNegativeButton("Exit App", (dialogInterface, which) -> {
+                    dialogInterface.dismiss();
                     finishAffinity();
                 })
                 .show();
+
+        styleDialog(dialog);
     }
 
     private String getPermissionName(String perm) {
@@ -377,6 +380,18 @@ public class MainActivity extends AppCompatActivity {
         return perm.substring(perm.lastIndexOf('.') + 1);
     }
 
+    private void styleDialog(AlertDialog dialog) {
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(R.drawable.dialog_background);
+        }
+        if (dialog.getButton(AlertDialog.BUTTON_POSITIVE) != null) {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xFF27D7D1);
+        }
+        if (dialog.getButton(AlertDialog.BUTTON_NEGATIVE) != null) {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(0xFF9FB5C7);
+        }
+    }
+
     // ============================================================
     // DEFAULT SMS HANDLER PROMPT
     // ============================================================
@@ -389,11 +404,12 @@ public class MainActivity extends AppCompatActivity {
                 if (currentDefault == null || !currentDefault.equals(myPackageName)) {
                     Log.d(TAG, "Not default SMS app — prompting user");
 
-                    new AlertDialog.Builder(this)
-                        .setTitle("Enable SMS Features")
-                        .setMessage("To read and manage SMS messages, MeetIn needs to be set as your default SMS app.\n\nTap 'Continue' to enable.")
+                    View content = LayoutInflater.from(this).inflate(R.layout.dialog_sms_default, null, false);
+                    AlertDialog dialog = new AlertDialog.Builder(this)
+                        .setTitle("Choose your SMS app")
+                        .setView(content)
                         .setCancelable(true)
-                        .setPositiveButton("Continue", (dialog, which) -> {
+                        .setPositiveButton("Open Android settings", (dialogInterface, which) -> {
                             try {
                                 Intent intent = new Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT);
                                 intent.putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, myPackageName);
@@ -404,6 +420,7 @@ public class MainActivity extends AppCompatActivity {
                         })
                         .setNegativeButton("Later", null)
                         .show();
+                    styleDialog(dialog);
                 } else {
                     Log.d(TAG, "Already default SMS app");
                 }

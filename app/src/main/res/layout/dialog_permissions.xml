@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="4dp">
+
+    <TextView
+        android:id="@+id/permissionIntro"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="MeetIn needs access to the features below to provide messaging, calls, notifications, and media sharing. Android will ask you to approve each access separately."
+        android:textColor="#D6E7F4"
+        android:textSize="15sp"
+        android:lineSpacingExtra="3dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="REQUESTED ACCESS"
+        android:textColor="#27D7D1"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.12" />
+
+    <TextView
+        android:id="@+id/permissionList"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/dialog_info_panel"
+        android:padding="14dp"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:lineSpacingExtra="5dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="You can review or change these choices anytime in Android Settings. Continue only if these features match how you plan to use MeetIn."
+        android:textColor="#9FB5C7"
+        android:textSize="12sp"
+        android:lineSpacingExtra="3dp" />
+</LinearLayout>
