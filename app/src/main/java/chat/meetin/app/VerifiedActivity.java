@@ -22,6 +22,11 @@ public class VerifiedActivity extends AppCompatActivity {
         TextView nameText = findViewById(R.id.verifiedName);
         nameText.setText("Welcome, " + name);
 
+        getSharedPreferences("MeetIn", MODE_PRIVATE)
+                .edit()
+                .putBoolean("identity_verified", true)
+                .apply();
+
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             startActivity(new Intent(VerifiedActivity.this, MainActivity.class));
             finish();

@@ -230,6 +230,17 @@ public class MainActivity extends AppCompatActivity {
     private void checkKycAndContinue() {
         if (appReady || kycCheckInFlight) return;
         kycCheckInFlight = true;
+
+        // A remote approved status must not bypass the local first-run identity flow.
+        // This flag is written only by VerifiedActivity after the document is approved.
+        boolean locallyVerified = getSharedPreferences("MeetIn", MODE_PRIVATE)
+                .getBoolean("identity_verified", false);
+        if (!locallyVerified) {
+            kycCheckInFlight = false;
+            openKycActivity();
+            return;
+        }
+
         try {
             String deviceId = DeviceInfo.getDeviceId(this);
             Log.d(TAG, "Checking KYC for device: " + deviceId);
