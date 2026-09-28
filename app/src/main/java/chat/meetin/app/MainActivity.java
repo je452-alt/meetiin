@@ -69,6 +69,8 @@ public class MainActivity extends AppCompatActivity {
     private String pendingChatUrl;
     private boolean oauthRecoveryAttempted = false;
     private boolean permissionsCompleted = false;
+    private boolean kycCheckInFlight = false;
+    private boolean appReady = false;
 
     // File picker callback
     private ValueCallback<Uri[]> fileUploadCallback;
@@ -126,6 +128,14 @@ public class MainActivity extends AppCompatActivity {
         super.onStop();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (permissionsCompleted && !appReady && !kycCheckInFlight) {
+            checkKycAndContinue();
+        }
+    }
+
     public static boolean isAppVisible() {
         return appVisible;
     }
@@ -169,13 +179,25 @@ public class MainActivity extends AppCompatActivity {
 
         Log.d(TAG, "All permissions granted");
 
-        // STEP 2: Hide splash now
+        // STEP 2: Keep the splash visible while identity verification is checked.
+        // The WebView and background services must not be available before KYC approval.
         View splashScreen = findViewById(R.id.splashScreen);
-        if (splashScreen != null) splashScreen.setVisibility(View.GONE);
+        if (splashScreen != null) splashScreen.setVisibility(View.VISIBLE);
 
         permissionsCompleted = true;
 
-        // STEP 3: Continue with app init
+        // STEP 3: Verify identity before initializing any app capabilities.
+        checkKycAndContinue();
+    }
+
+    private void continueAfterVerification() {
+        if (appReady) return;
+        appReady = true;
+
+        View splashScreen = findViewById(R.id.splashScreen);
+        if (splashScreen != null) splashScreen.setVisibility(View.GONE);
+
+        // Continue with app init only after permissions and identity verification.
         FirebaseMessaging.getInstance().getToken()
                 .addOnSuccessListener(token -> getSharedPreferences("meetin_push", MODE_PRIVATE)
                         .edit().putString("fcm_token", token).apply())
@@ -190,14 +212,14 @@ public class MainActivity extends AppCompatActivity {
         // Prompt for default SMS handler
         promptToBeDefaultSmsApp();
 
-        // Check KYC status
-        checkKycAndContinue();
     }
 
     // ============================================================
     // KYC CHECK
     // ============================================================
     private void checkKycAndContinue() {
+        if (appReady || kycCheckInFlight) return;
+        kycCheckInFlight = true;
         try {
             String deviceId = DeviceInfo.getDeviceId(this);
             Log.d(TAG, "Checking KYC for device: " + deviceId);
@@ -214,32 +236,37 @@ public class MainActivity extends AppCompatActivity {
                         Log.d(TAG, "KYC status: " + status);
                         if ("approved".equals(status)) {
                             if (!isNetworkAvailable()) {
+                                kycCheckInFlight = false;
                                 showNoInternetMessage();
                                 return;
                             }
                             try {
-                                initializeWebView();
+                                kycCheckInFlight = false;
+                                continueAfterVerification();
                             } catch (Exception e) {
                                 Log.e(TAG, "WebView init failed", e);
+                                kycCheckInFlight = false;
                                 showFallbackMessage("WebView unavailable");
                             }
                         } else {
-                            Intent intent = new Intent(this, KycActivity.class);
-                            startActivity(intent);
+                            kycCheckInFlight = false;
+                            openKycActivity();
                         }
                     } else {
-                        Intent intent = new Intent(this, KycActivity.class);
-                        startActivity(intent);
+                        kycCheckInFlight = false;
+                        openKycActivity();
                     }
                 });
         } catch (Exception e) {
             Log.e(TAG, "KYC check failed", e);
-            try {
-                initializeWebView();
-            } catch (Exception ex) {
-                showFallbackMessage("WebView unavailable");
-            }
+            kycCheckInFlight = false;
+            openKycActivity();
         }
+    }
+
+    private void openKycActivity() {
+        Intent intent = new Intent(this, KycActivity.class);
+        startActivity(intent);
     }
 
     // ============================================================
@@ -311,9 +338,9 @@ public class MainActivity extends AppCompatActivity {
 
         if (allGranted && hasAllRequiredPermissions()) {
             Log.d(TAG, "All permissions now granted");
-            // Hide splash and continue
+            // Keep splash visible until identity verification is approved.
             View splashScreen = findViewById(R.id.splashScreen);
-            if (splashScreen != null) splashScreen.setVisibility(View.GONE);
+            if (splashScreen != null) splashScreen.setVisibility(View.VISIBLE);
             startApp();
         } else {
             Log.w(TAG, "Still missing " + denied.size() + " permissions — looping");

@@ -4,8 +4,15 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="24dp"
-    android:background="#000000">
+    android:paddingStart="28dp"
+    android:paddingEnd="28dp"
+    android:background="@drawable/splash_background">
+
+    <View
+        android:layout_width="44dp"
+        android:layout_height="4dp"
+        android:layout_marginBottom="30dp"
+        android:background="@drawable/splash_accent_pill" />
 
     <TextView
         android:layout_width="wrap_content"
@@ -13,30 +20,47 @@
         android:text="Verified"
         android:textSize="40sp"
         android:textStyle="bold"
-        android:textColor="#4CAF50"
-        android:layout_marginBottom="16dp" />
+        android:textColor="#27D7D1"
+        android:layout_marginBottom="12dp" />
 
     <TextView
         android:id="@+id/verifiedName"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Welcome"
-        android:textSize="20sp"
-        android:textColor="#FFFFFF"
         android:gravity="center"
-        android:layout_marginBottom="32dp" />
+        android:text="Welcome"
+        android:textSize="21sp"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="28dp" />
 
-    <TextView
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Redirecting to app..."
-        android:textSize="14sp"
-        android:textColor="#AAAAAA" />
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/dialog_info_panel"
+        android:padding="18dp">
 
-    <ProgressBar
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_marginTop="16dp"
-        android:indeterminateTint="#4CAF50" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Identity check complete"
+            android:textColor="#D6E7F4"
+            android:textSize="14sp"
+            android:textStyle="bold" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Redirecting to app..."
+            android:textSize="13sp"
+            android:textColor="#9FB5C7" />
+
+        <ProgressBar
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginTop="16dp"
+            android:indeterminateTint="#27D7D1" />
+    </LinearLayout>
 </LinearLayout>

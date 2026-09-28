@@ -4,31 +4,49 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="24dp"
-    android:background="#000000">
+    android:paddingStart="28dp"
+    android:paddingEnd="28dp"
+    android:background="@drawable/splash_background">
+
+    <View
+        android:layout_width="44dp"
+        android:layout_height="4dp"
+        android:layout_marginBottom="34dp"
+        android:background="@drawable/splash_accent_pill" />
 
     <ProgressBar
-        android:layout_width="80dp"
-        android:layout_height="80dp"
-        android:indeterminateTint="#2196F3"
-        android:layout_marginBottom="32dp" />
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:indeterminateTint="#27D7D1"
+        android:layout_marginBottom="28dp" />
 
     <TextView
         android:id="@+id/statusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Verifying your document..."
-        android:textSize="20sp"
+        android:textSize="21sp"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
+        android:gravity="center"
+        android:layout_marginBottom="12dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="This may take up to 30 seconds"
+        android:textSize="14sp"
+        android:textColor="#B7CCDB"
+        android:gravity="center"
+        android:lineSpacingExtra="3dp" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="This may take up to 30 seconds"
-        android:textSize="14sp"
-        android:textColor="#AAAAAA"
-        android:gravity="center" />
-
+        android:layout_marginTop="30dp"
+        android:text="MEETIN"
+        android:textColor="#27D7D1"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.14" />
 </LinearLayout>
